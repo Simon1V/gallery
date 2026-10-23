@@ -135,6 +135,15 @@ interface DataStoreRepository {
 
   /** Returns whether automatic context compaction is enabled for the specified [taskId]. */
   fun readAutoContextCompact(taskId: String): Boolean
+
+  /**
+   * Fork addition: persists the user-tweaked config values of [modelName] (serialized
+   * `label=value` lines) so they survive new chats, model re-initialization, and app restarts.
+   */
+  fun saveModelConfigValues(modelName: String, values: String)
+
+  /** Fork addition: returns the persisted config values of [modelName], or null if none. */
+  fun readModelConfigValues(modelName: String): String?
 }
 
 /** Repository for managing data using Proto DataStore. */
@@ -490,6 +499,21 @@ class DefaultDataStoreRepository(
     return runBlocking {
       val settings = dataStore.data.first()
       settings.autoContextCompactByTaskMap[taskId] ?: false
+    }
+  }
+
+  override fun saveModelConfigValues(modelName: String, values: String) {
+    runBlocking {
+      dataStore.updateData { settings ->
+        settings.toBuilder().putModelConfigValues(modelName, values).build()
+      }
+    }
+  }
+
+  override fun readModelConfigValues(modelName: String): String? {
+    return runBlocking {
+      val settings = dataStore.data.first()
+      settings.modelConfigValuesMap[modelName]
     }
   }
 }

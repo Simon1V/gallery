@@ -791,6 +791,7 @@
   <string name="config_label_enable_speculative_decoding" translatable="false">Enable speculative decoding</string>
   <!-- Label for the 'Enable context compression' option in the model configuration dialog. -->
   <string name="config_label_enable_context_compression" translatable="true" description="This string appears as a switch label in the model configuration dialog, allowing the user to toggle automatic conversation context compression when approaching the token limit. [CHAR_LIMIT=45]">Automatically compress context</string>
+  <string name="config_label_enable_live_metrics" translatable="true" description="Fork addition: switch label in the model configuration dialog to show or hide the live metrics bar (inference speed, tokens, memory, context window usage). [CHAR_LIMIT=45]">Show live metrics</string>
   <!-- Description for the 'Automatically compress context' option in the model configuration dialog. -->
   <string name="config_desc_enable_context_compression" translatable="true" description="This string appears as helper text below the 'Automatically compress context' switch in the model configuration dialog, explaining that the chat context will be automatically compressed when approaching the token limit. [CHAR_LIMIT=160]">When a chat approaches the token limit, automatically compress the chat context so I can keep chatting.</string>
   <!-- Label for the 'Max result count' option in the model configuration dialog. -->

@@ -69,6 +69,34 @@ appears to mask this). Added to `app/build.gradle.kts`:
 implementation("androidx.documentfile:documentfile:1.0.1")
 ```
 
+### D. Settings persistence + context-size display (v1.1.0, 2026-10-24)
+
+Two upstream gaps found while running a long on-device conversation (16k `maxTokens`):
+user-tweaked sampler/context settings silently reverted to defaults on new chats / app
+restart, and there was no UI element to see the current context size.
+
+**Root cause (upstream):** config values live only in the in-memory `Model.configValues`
+map; `Model.preProcess()` re-defaults every value on each (re-)initialization, and the
+settings dialog wrote in-memory only — nothing was persisted to DataStore. The live-metrics
+bar (which *does* show context window usage % + progress bar + compaction-threshold marker)
+was hard-disabled in `ChatPanel.kt` (`isLiveMetricsFlagEnabled = false`).
+
+| File | Change |
+|---|---|
+| `app/src/main/proto/settings.proto` | New `map<string,string> model_config_values` field (per-model serialized `label=value` lines) in the `Settings` message. |
+| `data/DataStoreRepository.kt` | `saveModelConfigValues` / `readModelConfigValues` (interface + impl, mirroring the `autoContextCompactByTask` pattern). |
+| `ui/modelmanager/ModelManagerViewModel.kt` | `saveModelConfigValues(model)` (serialize → DataStore); `restoreModelConfigValues(model)` re-applies stored values over the defaults, called after **every** `preProcess()` (model construction, `processTasks()` on app start / task switch). Values are converted per the config's declared type (Int/Float/Boolean/String); unknown labels are skipped. |
+| `ui/common/ModelPageAppBar.kt` | Settings-dialog save path also persists the new values to DataStore (excluding the task-level auto-compact key, which upstream already persists separately). |
+| `data/Config.kt` + `strings.xml` | New `ENABLE_LIVE_METRICS` boolean config ("Show live metrics"), default **ON** in the fork, `needReinitialization = false` (display-only — toggling it never re-inits the model). Added to the LLM chat + NPU LLM config lists, so the toggle appears in the Configurations dialog. |
+| `ui/common/chat/ChatPanel.kt` | `isLiveMetricsFlagEnabled` now reads `model.getBooleanConfigValue(ENABLE_LIVE_METRICS, true)` instead of the hardcoded `false` → the live-metrics bar (context usage, speed, memory) is visible by default and switchable. |
+
+Effect: user settings (e.g. `maxTokens=16000`) now survive new chats, model re-init, and
+app restarts; the context window usage is visible in the chat UI (and switchable in the
+Configurations dialog). The toggle itself is persisted by the same mechanism.
+
+Built APK: `dist/edge-gallery-offline-v1.1.0.apk` (the v1.0.0 APK in the GitHub release
+remains the telemetry-removal-only build).
+
 ---
 
 ## Building
@@ -83,8 +111,9 @@ cd Android/src
 # APK: app/build/outputs/apk/debug/app-debug.apk  (~252 MB, bundles on-device models)
 ```
 
-A pre-built debug APK is committed to `dist/edge-gallery-offline.apk` (git-ignored in
-git, present in the working tree).
+A pre-built debug APK is in `dist/`: `edge-gallery-offline.apk` (v1.0.0, telemetry
+removal) and `edge-gallery-offline-v1.1.0.apk` (v1.1.0, + settings persistence and
+live-metrics display). Both are git-ignored in git, present in the working tree.
 
 ## Installing
 

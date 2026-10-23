@@ -111,6 +111,15 @@ object ConfigKeys {
       "Automatically compress context",
       R.string.config_label_enable_context_compression,
     )
+  // Fork addition: toggle for the live metrics bar (context window usage, speed, memory).
+  // Default ON in the fork so the context size is visible; users can switch it off in the
+  // configuration dialog (persisted via the model config values DataStore entry).
+  val ENABLE_LIVE_METRICS =
+    ConfigKey(
+      "enable_live_metrics",
+      "Show live metrics",
+      R.string.config_label_enable_live_metrics,
+    )
   val MAX_RESULT_COUNT =
     ConfigKey("max_result_count", "Max result count", R.string.config_label_max_result_count)
   val USE_GPU = ConfigKey("use_gpu", "Use GPU", R.string.config_label_use_gpu)
@@ -460,6 +469,14 @@ fun createLlmChatConfigs(
       BooleanSwitchConfig(key = ConfigKeys.ENABLE_SPECULATIVE_DECODING, defaultValue = false)
     )
   }
+  // Fork addition: live metrics toggle (default ON in the fork; display-only, no re-init).
+  configs.add(
+    BooleanSwitchConfig(
+      key = ConfigKeys.ENABLE_LIVE_METRICS,
+      defaultValue = true,
+      needReinitialization = false,
+    )
+  )
   return configs
 }
 
@@ -478,6 +495,14 @@ fun createLlmChatConfigsForNpuModel(
       key = ConfigKeys.ACCELERATOR,
       defaultValue = accelerators[0].label,
       options = accelerators.map { it.label },
+    )
+  )
+  // Fork addition: live metrics toggle (default ON in the fork; display-only, no re-init).
+  add(
+    BooleanSwitchConfig(
+      key = ConfigKeys.ENABLE_LIVE_METRICS,
+      defaultValue = true,
+      needReinitialization = false,
     )
   )
 }

@@ -108,6 +108,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
+import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.AudioAnimation
@@ -161,7 +162,10 @@ fun ChatPanel(
   val uiState by viewModel.uiState.collectAsState()
   val messages = uiState.messagesByModel[selectedModel.name] ?: listOf()
   val modelInitStatus by selectedModel.initStatusFlow.collectAsState()
-  val isLiveMetricsFlagEnabled = false
+  // Fork: the live metrics bar (context window usage, speed, memory) is now a user toggle
+  // instead of a hardcoded `false`; default ON so the context size is visible out of the box.
+  val isLiveMetricsFlagEnabled =
+    selectedModel.getBooleanConfigValue(ConfigKeys.ENABLE_LIVE_METRICS, defaultValue = true)
   val isLiveMetricsSupported = isLiveMetricsFlagEnabled && !selectedModel.isAiCore
   val hasLiveMetrics by
     remember(viewModel, selectedModel.name, isLiveMetricsSupported) {

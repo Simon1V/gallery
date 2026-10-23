@@ -35,6 +35,8 @@ This fork exists to be telemetry-free and offline-safe. Preserve these in every 
 5. `allowBackup=true`, DataStore, and plaintext HuggingFace token storage are **upstream behavior** — do not silently "improve" them; flag them if the maintainer wants changes (see `FORK_NOTES.md` → Known limitations).
 6. `implementation("androidx.documentfile:documentfile:1.0.1")` in `app/build.gradle.kts` fixes a latent upstream missing-dependency bug (`SkillManager.kt` uses `DocumentFile`) — keep it.
 7. `assets/model_allowlist.json` is the bundled offline allowlist (snapshot of `model_allowlists/1_0_20.json`) — keep it in sync if the model allowlist changes; the in-memory list at launch is this snapshot.
+8. **Config persistence (v1.1.0):** `ModelManagerViewModel.restoreModelConfigValues` re-applies DataStore-persisted config values after **every** `Model.preProcess()` (which re-defaults them). Keep the restore call at every `preProcess()` call site; `ModelPageAppBar`'s settings save path must keep calling `saveModelConfigValues`. Without this, user-tweaked sampler/context settings (e.g. 16k maxTokens) silently revert to defaults on new chats / app restart.
+9. **Live-metrics display (v1.1.0):** the `ENABLE_LIVE_METRICS` config (default ON) gates `ChatPanel`'s live-metrics bar (context window usage, speed, memory) — keep `needReinitialization = false` on it (display-only; toggling it must not re-init the model).
 
 ## Verification (on-device)
 

@@ -380,6 +380,8 @@ constructor(
     for (task in curTasks) {
       for (model in task.models) {
         model.preProcess()
+        // Fork: re-apply the user's persisted config values (preProcess re-defaults them).
+        restoreModelConfigValues(model)
       }
       // Move the model that is best for this task to the front.
       val bestModel = task.models.find { it.bestForTaskIds.contains(task.id) }
@@ -392,6 +394,50 @@ constructor(
 
   fun updateConfigValuesUpdateTrigger() {
     _uiState.update { it.copy(configValuesUpdateTrigger = System.currentTimeMillis()) }
+  }
+
+  // ---- Fork: persist user-tweaked model config values across chats/restarts ----------------
+
+  /** Serializes [model]'s config values to `label=value` lines and persists them to DataStore. */
+  fun saveModelConfigValues(model: Model) {
+    val lines =
+      model.configValues.entries
+        .filterNot { it.key == ConfigKeys.ENABLE_AUTO_CONTEXT_COMPACT.label }
+        .joinToString("\n") { entry -> "${entry.key}=${entry.value}" }
+    dataStoreRepository.saveModelConfigValues(model.name, lines)
+    Log.d(TAG, "Saved config values for model '${model.name}': $lines")
+  }
+
+  /**
+   * Restores persisted config values over the model's defaults. Call after `preProcess()`, which
+   * otherwise re-defaults every config value (upstream behavior that lost user-tweaked settings
+   * on new chats / app restarts).
+   */
+  private fun restoreModelConfigValues(model: Model) {
+    val stored = dataStoreRepository.readModelConfigValues(model.name) ?: return
+    val restoredValues = model.configValues.toMutableMap()
+    var restored = 0
+    for (line in stored.split("\n")) {
+      val idx = line.indexOf('=')
+      if (idx <= 0) continue
+      val label = line.substring(0, idx)
+      val raw = line.substring(idx + 1)
+      val config = model.configs.firstOrNull { it.key.label == label } ?: continue
+      val value =
+        when (config.valueType) {
+          ValueType.INT -> raw.toIntOrNull()
+          ValueType.FLOAT -> raw.toFloatOrNull()
+          ValueType.BOOLEAN -> raw.toBoolean()
+          else -> raw
+        }
+        ?: continue
+      restoredValues[label] = value
+      restored++
+    }
+    if (restored > 0) {
+      model.configValues = restoredValues
+      Log.d(TAG, "Restored $restored persisted config values for model '${model.name}'")
+    }
   }
 
   fun selectModel(model: Model) {
@@ -1753,6 +1799,8 @@ constructor(
         backendSpec = BackendSpec(runtimeType = RuntimeType.LITERT_LM, accelerators = accelerators),
       )
     model.preProcess()
+    // Fork: re-apply the user's persisted config values (preProcess re-defaults them).
+    restoreModelConfigValues(model)
 
     return model
   }

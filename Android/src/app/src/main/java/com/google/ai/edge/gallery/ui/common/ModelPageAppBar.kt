@@ -333,6 +333,8 @@ fun ModelPageAppBar(
         model.configValues = curConfigValues.filterKeys {
           it != ConfigKeys.ENABLE_AUTO_CONTEXT_COMPACT.label
         }
+        // Fork: persist the new config values so they survive new chats and app restarts.
+        modelManagerViewModel.saveModelConfigValues(model)
         when (task.id) {
           BuiltInTaskId.LLM_AGENT_CHAT -> {
             model.agentSkillTopKAdjusted = true
