@@ -40,6 +40,7 @@ import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.CategoryInfo
 import com.google.ai.edge.gallery.data.Config
+import com.google.ai.edge.gallery.data.ConfigEditorType
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.DEFAULT_MAX_TOKEN
 import com.google.ai.edge.gallery.data.DataStoreRepository
@@ -424,10 +425,14 @@ constructor(
       val raw = line.substring(idx + 1)
       val config = model.configs.firstOrNull { it.key.label == label } ?: continue
       val value =
-        when (config.valueType) {
-          ValueType.INT -> raw.toIntOrNull()
-          ValueType.FLOAT -> raw.toFloatOrNull()
-          ValueType.BOOLEAN -> raw.toBoolean()
+        when (config.type) {
+          // In-memory convention: slider values are always Float (config factories call
+          // .toFloat() on Int defaults, and the settings dialog writes Floats). Restoring
+          // an Int here would crash the dialog's unguarded `values[label] as Float` cast.
+          ConfigEditorType.NUMBER_SLIDER -> raw.toFloatOrNull()
+          ConfigEditorType.BOOLEAN_SWITCH ->
+            if (raw.equals("true", true) || raw.equals("false", true)) raw.toBoolean() else null
+          // Dropdown / segmented / selector / label: string values, stored as-is.
           else -> raw
         }
         ?: continue

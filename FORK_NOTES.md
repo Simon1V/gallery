@@ -75,24 +75,45 @@ Two upstream gaps found while running a long on-device conversation (16k `maxTok
 user-tweaked sampler/context settings silently reverted to defaults on new chats / app
 restart, and there was no UI element to see the current context size.
 
-**Root cause (upstream):** config values live only in the in-memory `Model.configValues`
-map; `Model.preProcess()` re-defaults every value on each (re-)initialization, and the
-settings dialog wrote in-memory only — nothing was persisted to DataStore. The live-metrics
-bar (which *does* show context window usage % + progress bar + compaction-threshold marker)
-was hard-disabled in `ChatPanel.kt` (`isLiveMetricsFlagEnabled = false`).
+**Root cause (upstream, 3 layers):** (1) config values live only in the in-memory
+`Model.configValues` map; `Model.preProcess()` re-defaults every value on each
+(re-)initialization, and the settings dialog wrote in-memory only — nothing was persisted
+to DataStore, so user settings reverted to defaults on new chats / app restart. (2) The
+settings dialog stores slider values as **Float** (e.g. `29532.49`), but the restore path
+parsed INT configs with `toIntOrNull()` — `"29532.49".toIntOrNull()` is `null`, so the
+value silently failed to restore and the model kept the 4000 default. (3) On OK, the
+appbar's `remember`-ed config list can be **stale** (the `LaunchedEffect` state update
+happens on the IO thread and is not always observed by the main-thread recomposition, so
+`modelConfigs` can still hold a previous task's configs while the dialog's value maps hold
+the current task's) — the unguarded `getValue()` on a missing key then threw
+`NoSuchElementException` and crashed the app on OK (reproduced: OK without touching a
+slider → crash; OK after touching one → no crash, because the edit forces the recomposition
+that refreshes the remembered set). The live-metrics bar (context usage % + progress bar +
+compaction-threshold marker) was hard-disabled in `ChatPanel.kt`
 
 | File | Change |
 |---|---|
 | `app/src/main/proto/settings.proto` | New `map<string,string> model_config_values` field (per-model serialized `label=value` lines) in the `Settings` message. |
 | `data/DataStoreRepository.kt` | `saveModelConfigValues` / `readModelConfigValues` (interface + impl, mirroring the `autoContextCompactByTask` pattern). |
-| `ui/modelmanager/ModelManagerViewModel.kt` | `saveModelConfigValues(model)` (serialize → DataStore); `restoreModelConfigValues(model)` re-applies stored values over the defaults, called after **every** `preProcess()` (model construction, `processTasks()` on app start / task switch). Values are converted per the config's declared type (Int/Float/Boolean/String); unknown labels are skipped. |
-| `ui/common/ModelPageAppBar.kt` | Settings-dialog save path also persists the new values to DataStore (excluding the task-level auto-compact key, which upstream already persists separately). |
+| `ui/modelmanager/ModelManagerViewModel.kt` | `saveModelConfigValues(model)` (serialize → DataStore); `restoreModelConfigValues(model)` re-applies stored values over the defaults, called after **every** `preProcess()` (model construction, `processTasks()` on app start / task switch). Values are parsed **per the config's editor type** (`ConfigEditorType`), not the declared `ValueType`: `NUMBER_SLIDER` → `Float` (the in-memory convention the settings dialog's unguarded `values[label] as Float` cast requires — restoring an `Int` crashes the dialog), `BOOLEAN_SWITCH` → `Boolean`, other editors → `String`. Float literals from earlier builds (e.g. `29532.49`) parse correctly; unknown labels are skipped. |
+| `ui/common/ModelPageAppBar.kt` | (a) Settings-dialog save path also persists the new values to DataStore (excluding the task-level auto-compact key, which upstream already persists separately). (b) **Stale-config OK-crash fix:** the OK comparison loop now skips any config whose key is missing from *either* value map (`if (key !in curConfigValues \|\| key !in dialogInitialValues) continue`) — `getValue()` on a missing key would otherwise throw and crash the app. |
 | `data/Config.kt` + `strings.xml` | New `ENABLE_LIVE_METRICS` boolean config ("Show live metrics"), default **ON** in the fork, `needReinitialization = false` (display-only — toggling it never re-inits the model). Added to the LLM chat + NPU LLM config lists, so the toggle appears in the Configurations dialog. |
 | `ui/common/chat/ChatPanel.kt` | `isLiveMetricsFlagEnabled` now reads `model.getBooleanConfigValue(ENABLE_LIVE_METRICS, true)` instead of the hardcoded `false` → the live-metrics bar (context usage, speed, memory) is visible by default and switchable. |
 
 Effect: user settings (e.g. `maxTokens=16000`) now survive new chats, model re-init, and
 app restarts; the context window usage is visible in the chat UI (and switchable in the
-Configurations dialog). The toggle itself is persisted by the same mechanism.
+Configurations dialog); the Configurations dialog can be opened and confirmed (OK/Cancel)
+without crashing. The toggle itself is persisted by the same mechanism.
+
+Verified on-device (Pixel 8a, Gemma-4-E2B-it): DataStore `settings.pb` contains
+`Max tokens=29532.49`; after a cold restart the log shows `Restored 8 persisted config
+values for model 'Gemma-4-E2B-it'` at all restore sites and the Configurations dialog
+opens with the slider at the persisted value; OK/Cancel with no change, with a slider
+change, and with a text-field change all pass without crash (zero `FATAL EXCEPTION` in
+logcat across the test matrix). Note: the dialog may briefly show a stale row from a
+previous task (e.g. "Visual token budget" on the chat page) until the remembered config
+set refreshes — harmless (the OK guard makes it crash-proof) and it self-corrects after
+any slider interaction.
 
 Built APK: `dist/edge-gallery-offline-v1.1.0.apk` (the v1.0.0 APK in the GitHub release
 remains the telemetry-removal-only build).

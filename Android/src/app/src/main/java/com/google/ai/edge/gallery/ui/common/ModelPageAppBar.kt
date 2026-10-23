@@ -198,7 +198,9 @@ fun ModelPageAppBar(
         mutableStateOf(model.configs.any { it.key == ConfigKeys.ENABLE_SPECULATIVE_DECODING })
       }
     var currentConfigs by remember(model.name, task.id) { mutableStateOf(model.configs) }
-    var currentConfigValues by remember(model.name, task.id) { mutableStateOf(model.configValues) }
+    var currentConfigValues by remember(model.name, task.id) {
+      mutableStateOf(model.configValues)
+    }
 
     LaunchedEffect(model.name, task.id) {
       // Check if the model file supports speculative decoding and visual token budget selection.
@@ -288,6 +290,12 @@ fun ModelPageAppBar(
         var needReinitialization = false
         for (config in modelConfigs) {
           val key = config.key.label
+          // Guard against a stale remembered config set (e.g. the LaunchedEffect state
+          // update on the IO thread is not observed by the main-thread recomposition, so
+          // modelConfigs can still hold a previous task's configs while the dialog's value
+          // maps hold the current task's). Only compare keys present in BOTH value maps —
+          // getValue() on a missing key would otherwise throw and crash on OK.
+          if (key !in curConfigValues || key !in dialogInitialValues) continue
           val oldValue =
             convertValueToTargetType(
               value = dialogInitialValues.getValue(key),

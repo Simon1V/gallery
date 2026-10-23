@@ -154,7 +154,9 @@ fun ConfigDialog(
   curSystemPrompt: String = "",
 ) {
   val values: SnapshotStateMap<String, Any> = remember {
-    mutableStateMapOf<String, Any>().apply { putAll(initialValues) }
+    mutableStateMapOf<String, Any>().apply {
+      putAll(initialValues)
+    }
   }
   val interactionSource = remember { MutableInteractionSource() }
   var selectedTabIndex by remember { mutableIntStateOf(0) }
