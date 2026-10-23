@@ -11,6 +11,21 @@ AI Edge Gallery is the premier destination for running the world's most powerful
 
 The latest version brings official support for the newly released EmbeddingGemma 2 model. With this release, we bring cutting edge, multimodal semantic search running 100% on your device. Try out these new capabilities in our new features Instant Media Search and Video Moment Finder.
 
+> ## ⚠️ This is a privacy-focused fork
+>
+> This repository is a **fork of [google-ai-edge/gallery](https://github.com/google-ai-edge/gallery)**, modified to run **fully offline** with **zero telemetry**. The install links and screenshots below describe the *upstream* app; for this fork, build the APK yourself (see [FORK_NOTES.md](FORK_NOTES.md)).
+>
+> **What changed in this fork** (full details in [FORK_NOTES.md](FORK_NOTES.md)):
+>
+> | Upstream behavior | This fork |
+> |---|---|
+> | Firebase Analytics + crash reporting **on by default**, sending raw exception text to Google | **Removed entirely** — no Firebase SDK, no FCM, zero network traffic to Google |
+> | FCM push registration at startup + untrusted push deeplinks | **Removed** |
+> | Model-list fetch hangs indefinitely when offline | **Fixed** — local-first load (bundled allowlist) + bounded background refresh with timeouts |
+> | Silent GitHub release check on every screen resume | **Gated** — only when the network is actually usable |
+>
+> Inference, chat, and all model I/O remain 100% on-device exactly as upstream — this fork removes the *telemetry and hang*, not the AI features.
+
 
 | **Install the app today from Google Play** | **Install the app today from App Store** | **Download for macOS** |
 | :--- | :--- | :--- |
@@ -66,11 +81,13 @@ For users without Google Play access, install the apk from the [**latest release
 
 *   **Google AI Edge:** Core APIs and tools for on-device ML.
 *   **LiteRT:** Lightweight runtime for optimized model execution.
-*   **Hugging Face Integration:** For model discovery and download.
+*   **Hugging Face Integration:** For model discovery and download — in this fork only used when online; no other HuggingFace/Google network traffic exists.
 
 ## ⌨️ Development
 
 Check out the [development notes](DEVELOPMENT.md) for instructions about how to build the app locally.
+
+This fork's build requirements, invariants, and change log are in [FORK_NOTES.md](FORK_NOTES.md). AI coding agents: see [AGENTS.md](AGENTS.md).
 
 ## 🤝 Feedback
 
