@@ -216,6 +216,9 @@ constructor(@IoDispatcher private val ioDispatcher: CoroutineDispatcher) {
     val url = URL(urlString)
     val connection = url.openConnection() as HttpURLConnection
     connection.requestMethod = method
+    // Fail fast instead of hanging indefinitely when offline.
+    connection.connectTimeout = 10_000
+    connection.readTimeout = 15_000
     connection.setRequestProperty("User-Agent", USER_AGENT)
     if (!accessToken.isNullOrEmpty()) {
       connection.setRequestProperty("Authorization", "Bearer $accessToken")

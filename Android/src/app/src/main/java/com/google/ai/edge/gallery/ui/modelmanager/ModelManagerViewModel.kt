@@ -26,9 +26,11 @@ import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.gallery.AppLifecycleProvider
 import com.google.ai.edge.gallery.BuildConfig
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.common.JsonObjAndTextContent
 import com.google.ai.edge.gallery.common.ProjectConfig
 import com.google.ai.edge.gallery.common.SystemPromptHelper
 import com.google.ai.edge.gallery.common.getJsonResponse
+import com.google.ai.edge.gallery.common.isNetworkAvailable
 import com.google.ai.edge.gallery.common.getModelStorageDir
 import com.google.ai.edge.gallery.common.isAICoreSupported
 import com.google.ai.edge.gallery.customtasks.common.CustomTask
@@ -96,6 +98,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
@@ -105,6 +111,10 @@ import net.openid.appauth.ResponseTypeValues
 
 private const val TAG = "AGModelManagerViewModel"
 private const val TEXT_INPUT_HISTORY_MAX_SIZE = 50
+// Hard deadline (ms) for the background allowlist refresh; covers the pathological
+// case where the TLS handshake inside HttpURLConnection.connect() hangs indefinitely
+// on Android (socket timeouts do not apply to it).
+private const val ALLOWLIST_FETCH_DEADLINE_MS = 20_000L
 private const val MODEL_ALLOWLIST_FILENAME = "model_allowlist.json"
 private const val ALLOWLIST_BASE_URL =
   "https://raw.githubusercontent.com/google-ai-edge/gallery/refs/heads/main/model_allowlists"
@@ -1291,19 +1301,15 @@ constructor(
         }
 
         if (modelAllowlist == null) {
-          // Load from github.
-          var version = BuildConfig.VERSION_NAME.replace(".", "_")
-          val url = getAllowlistUrl(version)
-          Log.d(TAG, "Loading model allowlist from internet. Url: $url")
-          val data = getJsonResponse<ModelAllowlist>(url = url)
-          modelAllowlist = data?.jsonObj
+          // Load from local sources only: the model list must appear instantly, with or
+          // without internet. A background refresh (below) keeps the disk cache current
+          // when online, so the next launch picks up any upstream changes.
+          Log.w(TAG, "Falling back to locally cached model allowlist")
+          modelAllowlist = readModelAllowlistFromDisk()
 
           if (modelAllowlist == null) {
-            Log.w(TAG, "Failed to load model allowlist from internet. Trying to load it from disk")
-            modelAllowlist = readModelAllowlistFromDisk()
-          } else {
-            Log.d(TAG, "Done: loading model allowlist from internet")
-            saveModelAllowlistToDisk(modelAllowlistContent = data?.textContent ?: "{}")
+            Log.w(TAG, "No cached allowlist; loading bundled allowlist from app assets")
+            modelAllowlist = readBundledModelAllowlistFromAssets()
           }
         }
 
@@ -1431,6 +1437,26 @@ constructor(
         startAutoDownloadModels()
         refreshSupplementaryStatuses()
         Log.d(TAG, "loadModelAllowlist: Done")
+
+          // Keep the allowlist fresh in the background when online. This runs off the
+          // critical path, so the UI is never blocked by a network fetch; on success the
+          // fresh allowlist is saved to the disk cache for the next launch. The launch
+          // itself must run on Dispatchers.IO: fetchAllowlistBounded blocks the calling
+          // thread for up to the deadline, which would ANR the app if done on the main
+          // thread.
+          if (isNetworkAvailable(context)) {
+            val url = getAllowlistUrl(BuildConfig.VERSION_NAME.replace(".", "_"))
+            Log.d(TAG, "Starting background allowlist refresh. Url: $url")
+            viewModelScope.launch(Dispatchers.IO) {
+              val data = fetchAllowlistBounded(url)
+              if (data != null) {
+                saveModelAllowlistToDisk(modelAllowlistContent = data?.textContent ?: "{}")
+                Log.d(TAG, "Background allowlist refresh saved to disk cache")
+              } else {
+                Log.w(TAG, "Background allowlist refresh failed; keeping local copy")
+              }
+            }
+          }
       } catch (e: Exception) {
         Log.e(TAG, "Failed to load model allowlist", e)
       }
@@ -1517,6 +1543,43 @@ constructor(
     }
 
     return null
+  }
+
+  /**
+   * Loads the model allowlist bundled into the app's assets, so the model list is available
+   * on a fresh install with no internet access and no prior on-disk cache.
+   */
+  private fun readBundledModelAllowlistFromAssets(): ModelAllowlist? {
+    return try {
+      Log.d(TAG, "Reading bundled model allowlist from app assets")
+      val content =
+        context.assets.open(MODEL_ALLOWLIST_FILENAME).bufferedReader().use { it.readText() }
+      val gson = Gson()
+      gson.fromJson(content, ModelAllowlist::class.java)
+    } catch (e: Exception) {
+      Log.e(TAG, "failed to read bundled model allowlist from assets", e)
+      null
+    }
+  }
+
+  /**
+   * Fetches the allowlist on a dedicated thread with a hard deadline, so a flaky or
+   * blackholed network (where the HTTPS handshake inside HttpURLConnection.connect()
+   * ignores the socket timeouts on Android) can never block the UI thread or the model
+   * list load. Returns null if the fetch fails or exceeds the deadline.
+   */
+  private fun fetchAllowlistBounded(url: String): JsonObjAndTextContent<ModelAllowlist>? {
+    val executor = Executors.newSingleThreadExecutor()
+    val future = executor.submit(Callable { getJsonResponse<ModelAllowlist>(url = url) })
+    return try {
+      future.get(ALLOWLIST_FETCH_DEADLINE_MS, TimeUnit.MILLISECONDS)
+    } catch (e: Exception) {
+      Log.w(TAG, "Bounded allowlist fetch failed or timed out: ${e::class.java.simpleName}")
+      null
+    } finally {
+      future.cancel(true)
+      executor.shutdownNow()
+    }
   }
 
   private fun isModelPartiallyDownloaded(model: Model): Boolean {

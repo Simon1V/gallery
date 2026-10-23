@@ -1,1 +1,9 @@
 .DS_Store
+
+# Gradle / Android build artifacts
+.gradle/
+build/
+**/build/
+local.properties
+# Pre-built delivery APK (kept in the working tree, not in git — 252 MB)
+dist/*.apk

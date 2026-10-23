@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -46,6 +47,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.ai.edge.gallery.BuildConfig
 import com.google.ai.edge.gallery.common.getJsonResponse
+import com.google.ai.edge.gallery.common.isNetworkAvailable
 import com.google.ai.edge.gallery.ui.common.ClickableLink
 import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +64,7 @@ fun NewReleaseNotification() {
   var newReleaseVersion by remember { mutableStateOf("") }
   var newReleaseUrl by remember { mutableStateOf("") }
   val lifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current
+  val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
 
   DisposableEffect(lifecycleOwner) {
@@ -70,22 +73,27 @@ fun NewReleaseNotification() {
       // Log or perform actions based on the lifecycle event.
       when (event) {
         Lifecycle.Event.ON_RESUME -> {
-          coroutineScope.launch {
-            withContext(Dispatchers.IO) {
-              Log.d(TAG, "Checking for new release...")
-              val info =
-                getJsonResponse<ReleaseInfo>("https://api.github.com/repos/$REPO/releases/latest")
-              if (info != null) {
-                val curRelease = BuildConfig.VERSION_NAME
-                val newRelease = info.jsonObj.tag_name
-                val isNewer = isNewerRelease(currentRelease = curRelease, newRelease = newRelease)
-                Log.d(TAG, "curRelease: $curRelease, newRelease: $newRelease, isNewer: $isNewer")
-                if (isNewer) {
-                  newReleaseVersion = newRelease
-                  newReleaseUrl = info.jsonObj.html_url
+          // Only check for a newer release when online; never block or fetch offline.
+          if (isNetworkAvailable(context)) {
+            coroutineScope.launch {
+              withContext(Dispatchers.IO) {
+                Log.d(TAG, "Checking for new release...")
+                val info =
+                  getJsonResponse<ReleaseInfo>("https://api.github.com/repos/$REPO/releases/latest")
+                if (info != null) {
+                  val curRelease = BuildConfig.VERSION_NAME
+                  val newRelease = info.jsonObj.tag_name
+                  val isNewer = isNewerRelease(currentRelease = curRelease, newRelease = newRelease)
+                  Log.d(TAG, "curRelease: $curRelease, newRelease: $newRelease, isNewer: $isNewer")
+                  if (isNewer) {
+                    newReleaseVersion = newRelease
+                    newReleaseUrl = info.jsonObj.html_url
+                  }
                 }
               }
             }
+          } else {
+            Log.d(TAG, "Offline: skipping new release check")
           }
         }
 

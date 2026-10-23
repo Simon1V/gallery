@@ -21,6 +21,8 @@ import android.content.res.AssetFileDescriptor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -94,6 +96,9 @@ inline fun <reified T> getJsonResponse(url: String): JsonObjAndTextContent<T>? {
   try {
     val connection = URL(url).openConnection() as HttpURLConnection
     connection.requestMethod = "GET"
+    // Fail fast instead of hanging indefinitely when offline.
+    connection.connectTimeout = 10_000
+    connection.readTimeout = 15_000
     connection.connect()
 
     val responseCode = connection.responseCode
@@ -115,6 +120,26 @@ inline fun <reified T> getJsonResponse(url: String): JsonObjAndTextContent<T>? {
   }
 
   return null
+}
+
+/**
+ * Returns whether the device currently has an active network with a usable transport
+ * (Wi-Fi, Ethernet, or cellular). Used to skip remote fetches when offline, so the app
+ * can start and run with no internet access.
+ */
+fun isNetworkAvailable(context: Context): Boolean {
+  val connectivityManager =
+    context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+  val network = connectivityManager.activeNetwork ?: return false
+  val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+  val hasTransport =
+    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+      capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+      capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+  // Require the INTERNET capability: a Wi-Fi network that is connected but has no
+  // uplink (airplane mode, or a router without internet) must count as offline.
+  return hasTransport &&
+    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
 
 /** Parses a JSON string into an object of type [T] using Gson. */

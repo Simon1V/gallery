@@ -112,10 +112,10 @@ dependencies {
   implementation(libs.hilt.android)
   implementation(libs.hilt.navigation.compose)
   implementation(libs.play.services.oss.licenses)
-  implementation(platform(libs.firebase.bom))
-  implementation(libs.firebase.analytics)
-  implementation(libs.firebase.messaging)
   implementation(libs.androidx.exifinterface)
+  // SkillManager imports androidx.documentfile.provider.DocumentFile; the upstream
+  // build file is missing this dependency, so declare it explicitly here.
+  implementation("androidx.documentfile:documentfile:1.0.1")
   implementation(libs.moshi.kotlin)
   ksp(libs.hilt.android.compiler)
   ksp("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")

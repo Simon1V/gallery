@@ -16,24 +16,31 @@
 
 package com.google.ai.edge.gallery
 
-import android.util.Log
-import com.google.firebase.Firebase
-import com.google.firebase.analytics.FirebaseAnalytics
-import com.google.firebase.analytics.analytics
+import android.os.Bundle
 
-private var hasLoggedAnalyticsWarning = false
+/**
+ * No-op stand-in for Firebase Analytics.
+ *
+ * The Firebase Analytics SDK has been removed from the app so it can run fully offline.
+ * All existing `firebaseAnalytics?.logEvent(...)` call sites keep compiling against this
+ * class; every call is silently dropped, so no telemetry ever leaves the device.
+ */
+class NoopFirebaseAnalytics {
+  fun logEvent(name: String, defaultEventBundle: Bundle?) {
+    // No-op: Firebase Analytics has been removed; nothing is sent off-device.
+  }
 
-val firebaseAnalytics: FirebaseAnalytics?
-  get() =
-    runCatching { Firebase.analytics }
-      .onFailure { exception ->
-        // Firebase.analytics can throw an exception if goolgle-services is not set up, e.g.,
-        // missing google-services.json.
-        if (!hasLoggedAnalyticsWarning) {
-          Log.w("AGAnalyticsFirebase", "Firebase Analytics is not available", exception)
-        }
-      }
-      .getOrNull()
+  fun setAnalyticsCollectionEnabled(enableCollection: Boolean) {
+    // No-op: Firebase Analytics has been removed.
+  }
+
+  object Event {
+    const val APP_OPEN: String = "app_open"
+  }
+}
+
+val firebaseAnalytics: NoopFirebaseAnalytics
+  get() = NoopFirebaseAnalytics()
 
 enum class GalleryEvent(val id: String) {
   CAPABILITY_SELECT(id = "capability_select"),
