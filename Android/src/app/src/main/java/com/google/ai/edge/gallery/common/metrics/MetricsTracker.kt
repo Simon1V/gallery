@@ -144,11 +144,13 @@ interface MetricsTracker {
       timeSource: TimeSource = TimeSource.Monotonic,
     ): MetricsTracker {
 
-      val enableInferenceMetrics = false
+      // Fork: gate the real tracker on the user-facing live-metrics toggle (default ON),
+      // instead of upstream's hardcoded `false` which made the LiveMetricsBar unreachable.
+      val enableInferenceMetrics =
+        model.getBooleanConfigValue(ConfigKeys.ENABLE_LIVE_METRICS, defaultValue = true)
 
       if (!enableInferenceMetrics) {
-        // Returns a no-op tracker if benchmark telemetry is disabled or the model does not support
-        // benchmark mode.
+        // Returns a no-op tracker when the live-metrics toggle is off.
         return NoOpMetricsTracker()
       }
 
@@ -273,7 +275,10 @@ internal constructor(
    * Whether live metrics streaming is enabled for this tracker instance. Captured once at
    * construction time so the live stream behavior remains consistent across the session.
    */
-  private val enableLiveMetrics: Boolean = false
+  // Fork: read the user-facing live-metrics toggle (default ON) instead of upstream's
+  // hardcoded `false`, so live snapshots actually reach the LiveMetricsBar.
+  private val enableLiveMetrics: Boolean =
+    model.getBooleanConfigValue(ConfigKeys.ENABLE_LIVE_METRICS, defaultValue = true)
 
   private val liveUpdateSampler: PeriodicSampler? =
     if (enableLiveMetrics) {

@@ -133,8 +133,10 @@ cd Android/src
 ```
 
 A pre-built debug APK is in `dist/`: `edge-gallery-offline.apk` (v1.0.0, telemetry
-removal) and `edge-gallery-offline-v1.1.0.apk` (v1.1.0, + settings persistence and
-live-metrics display). Both are git-ignored in git, present in the working tree.
+removal), `edge-gallery-offline-v1.1.0.apk` (v1.1.0, + settings persistence and
+live-metrics display), and `edge-gallery-offline-v1.1.1.apk` (v1.1.1, + the live-metrics
+bar actually rendering — see section E). All are git-ignored in git, present in the
+working tree.
 
 ## Installing
 
@@ -149,6 +151,42 @@ live-metrics display). Both are git-ignored in git, present in the working tree.
 | Airplane mode (fully offline) | Model list (11 models) loaded from bundled asset in ~26 ms; zero network I/O; no hang. ✅ |
 | Wi-Fi radio on, no uplink (100 % ping loss) | List still instant; background refresh hit its 20 s deadline on an IO thread and failed gracefully ("keeping local copy"); **zero ANRs**, UI responsive. ✅ |
 | Online (real internet) | Not yet exercised on-device (phone had no uplink during testing); the fetch uses the upstream `getJsonResponse` (known-good when online) under a bounded executor, so risk is minimal. On success it updates the disk cache for the next launch. |
+
+### E. Live-metrics bar was dead in v1.1.0 — fixed in v1.1.1 (2026-10-24)
+
+**Symptom:** the `ENABLE_LIVE_METRICS` toggle (v1.1.0) existed and was ON, but the
+LiveMetricsBar never appeared above the input box after inference.
+
+**Root cause (two upstream hardcoded gates, both `false`):**
+
+1. `MetricsTracker.create()` (`common/metrics/MetricsTracker.kt`):
+   `val enableInferenceMetrics = false` → always returned `NoOpMetricsTracker`, whose
+   `liveMetrics` StateFlow is permanently `null` → `ChatPanel.hasLiveMetrics` stayed
+   `false` → the bar never composed.
+2. `LitertlmMetricsTracker`: `private val enableLiveMetrics: Boolean = false` → even a
+   real tracker would never emit live snapshots (`emitLiveSnapshot` early-returns).
+
+**Fix (v1.1.1):** both gates now read
+`model.getBooleanConfigValue(ConfigKeys.ENABLE_LIVE_METRICS, defaultValue = true)` —
+the same user-facing toggle that gates the bar in `ChatPanel`. Toggle ON → real tracker
++ live emission + bar; toggle OFF → NoOp tracker + bar hidden (consistent).
+
+**On-device verification (Pixel 8a, Gemma-4-E2B-it, fresh chat, 2026-10-24):**
+
+| Check | Result |
+|---|---|
+| Bar renders after first inference | ✅ Speed / Tokens / RAM rows + Context row visible in the card above the input box |
+| Context row: `-- / 15553` + progress bar + `75% compress` marker | ✅ max = restored DataStore value (15553) |
+| RAM row: 3.83 GB / 51.8% | ✅ |
+| Blue “Toggle live metrics” icon in the input bar (upstream quick-toggle) | ✅ visible |
+
+**Note — consumed context tokens show `--`:** upstream-engine quirk (documented in
+`LitertlmInferenceMetricsTracker` KDoc): for conversations created with `initialMessages`
+(e.g. system instruction, restored session, compaction re-feed), LiteRT-LM defers
+prefill and `session.getTokenCount()` returns 0 until the first turn's prefill pass —
+so the consumed count is unavailable and the bar shows `-- / <max>` (the empty-state
+format). The max, progress bar, and compaction-threshold marker still render. On
+conversations without `initialMessages` the numeric count is expected to appear.
 
 ## Known limitations
 
