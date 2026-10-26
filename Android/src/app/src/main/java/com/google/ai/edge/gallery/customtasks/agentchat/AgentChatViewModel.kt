@@ -20,6 +20,7 @@ import com.google.ai.edge.gallery.agent.AgentChatExecutor
 import com.google.ai.edge.gallery.agent.AgentRuntimeExecutor
 import com.google.ai.edge.gallery.agent.sessions.LlmSessionManager
 import com.google.ai.edge.gallery.data.DataStoreRepository
+import com.google.ai.edge.gallery.data.SystemPromptProfileRepository
 import com.google.ai.edge.gallery.data.SystemPromptRepository
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,9 +31,10 @@ class AgentChatViewModel
 @Inject
 constructor(
   systemPromptRepository: SystemPromptRepository,
+  systemPromptProfileRepository: SystemPromptProfileRepository,
   @AgentChatExecutor runtimeExecutor: AgentRuntimeExecutor,
   llmSessionManager: LlmSessionManager,
   dataStoreRepository: DataStoreRepository? = null,
 ) :
-LlmChatViewModel(systemPromptRepository, runtimeExecutor,
+LlmChatViewModel(systemPromptRepository, systemPromptProfileRepository, runtimeExecutor,
 llmSessionManager, dataStoreRepository)

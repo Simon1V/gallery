@@ -22,6 +22,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.google.ai.edge.gallery.data.SystemPromptProfile
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -40,8 +41,8 @@ open class SystemPromptProfileRepository
 @Inject
 constructor(
   private val dataStoreRepository: DataStoreRepository,
+  @ApplicationContext private val context: Context,
 ) {
-
   // ---------------------------------------------------------------- folder URI (global)
 
   private fun folderUriKey() = "system_profile_folder_uri"
@@ -64,7 +65,7 @@ constructor(
    * Re-acquires the persisted folder permission after process restart (SAF grants don't
    * survive process death). Safe to call even when no folder is set.
    */
-  open fun reacquireFolderPermission(context: Context) {
+  open fun reacquireFolderPermission() {
     val uriString = getFolderUri() ?: return
     try {
       context.contentResolver.takePersistableUriPermission(
@@ -77,9 +78,29 @@ constructor(
     }
   }
 
+  // ---------------------------------------------------------------- active profile (per task)
+
+  private fun activeProfileKey(taskId: String) = "system_prompt_profile_$taskId"
+
+  /**
+   * The active profile name for [taskId] (`"default"` or a file name), or null when the task
+   * is in free-text mode (v1.1.0 DataStore custom prompt).
+   */
+  open fun getActiveProfile(taskId: String): String? =
+    dataStoreRepository.readSecret(activeProfileKey(taskId))
+
+  /** Sets (or, with null, clears) the active profile for [taskId]. */
+  open fun setActiveProfile(taskId: String, name: String?) {
+    if (name == null) {
+      dataStoreRepository.deleteSecret(activeProfileKey(taskId))
+    } else {
+      dataStoreRepository.saveSecret(activeProfileKey(taskId), name)
+    }
+  }
+
   // ---------------------------------------------------------------- profile I/O (SAF)
 
-  private fun folderDocumentFile(context: Context): DocumentFile? {
+  private fun folderDocumentFile(): DocumentFile? {
     val uriString = getFolderUri() ?: return null
     val uri = Uri.parse(uriString)
     return DocumentFile.fromTreeUri(context, uri)?.takeIf { it.canRead() }
@@ -91,13 +112,13 @@ constructor(
    * @return Empty list when no folder is set, the URI is revoked, or the folder is empty;
    *   unparseable `.json` files are skipped with a log (never fatal).
    */
-  open fun listProfiles(context: Context): List<SystemPromptProfile> {
-    val root = folderDocumentFile(context) ?: return emptyList()
+  open fun listProfiles(): List<SystemPromptProfile> {
+    val root = folderDocumentFile() ?: return emptyList()
     val profiles = mutableListOf<SystemPromptProfile>()
     root.listFiles().asSequence().forEach { file ->
       val fileName = file.name ?: return@forEach
       if (!file.isFile || !fileName.endsWith(".json")) return@forEach
-      val content = readFileContent(context, file) ?: return@forEach
+      val content = readFileContent(file) ?: return@forEach
       val profile = SystemPromptProfile.parse(content) ?: return@forEach
       profiles.add(profile)
     }
@@ -109,10 +130,10 @@ constructor(
    * unset/revoked, the file is missing, or the file is unreadable (stale folder — callers
    * fall back to the task default).
    */
-  open fun readProfilePrompt(context: Context, name: String): String? {
-    val root = folderDocumentFile(context) ?: return null
+  open fun readProfilePrompt(name: String): String? {
+    val root = folderDocumentFile() ?: return null
     val file = findChildByName(root, sanitizeProfileFileName(name)) ?: return null
-    val content = readFileContent(context, file) ?: return null
+    val content = readFileContent(file) ?: return null
     return SystemPromptProfile.parse(content)?.prompt
   }
 
@@ -122,10 +143,10 @@ constructor(
    *
    * @return true if the file was found and written.
    */
-  open fun updateProfilePrompt(context: Context, name: String, prompt: String): Boolean {
-    val root = folderDocumentFile(context) ?: return false
+  open fun updateProfilePrompt(name: String, prompt: String): Boolean {
+    val root = folderDocumentFile() ?: return false
     val file = findChildByName(root, sanitizeProfileFileName(name)) ?: return false
-    return writeProfileFile(context, file, name, prompt)
+    return writeProfileFile(file, name, prompt)
   }
 
   /**
@@ -133,8 +154,8 @@ constructor(
    *
    * @return true if the file was created (name was valid and unique); false otherwise.
    */
-  open fun addProfile(context: Context, name: String, prompt: String): Boolean {
-    val root = folderDocumentFile(context) ?: return false
+  open fun addProfile(name: String, prompt: String): Boolean {
+    val root = folderDocumentFile() ?: return false
     val trimmed = name.trim()
     if (trimmed.isEmpty()) {
       Log.w(TAG, "addProfile: blank name")
@@ -166,19 +187,15 @@ constructor(
       return false
     } ?: return false
     val file = DocumentFile.fromSingleUri(context, createdUri) ?: return false
-    return writeProfileFile(context, file, trimmed, prompt)
+    return writeProfileFile(file, trimmed, prompt)
   }
-
-  /** Finds a direct child of [root] whose file name matches [fileName], or null. */
-  private fun findChildByName(root: DocumentFile, fileName: String): DocumentFile? =
-    root.listFiles().firstOrNull { it.name == fileName }
 
   /**
    * The bundled default profile's prompt (app asset). Read-only — edits to the default
    * profile are stored via the DataStore custom-prompt mechanism instead (see
    * SystemPromptRepository).
    */
-  open fun defaultProfilePrompt(context: Context): String {
+  open fun defaultProfilePrompt(): String {
     return try {
       val content =
         context.assets.open("profiles/default.json").bufferedReader().use { it.readText() }
@@ -191,7 +208,7 @@ constructor(
 
   // ---------------------------------------------------------------- helpers
 
-  private fun readFileContent(context: Context, file: DocumentFile): String? {
+  private fun readFileContent(file: DocumentFile): String? {
     return try {
       val stream = context.contentResolver.openInputStream(file.uri) ?: return null
       stream.bufferedReader().use { it.readText() }
@@ -202,7 +219,6 @@ constructor(
   }
 
   private fun writeProfileFile(
-    context: Context,
     file: DocumentFile,
     name: String,
     prompt: String,
@@ -217,6 +233,10 @@ constructor(
       false
     }
   }
+
+  /** Finds a direct child of [root] whose file name matches [fileName], or null. */
+  private fun findChildByName(root: DocumentFile, fileName: String): DocumentFile? =
+    root.listFiles().firstOrNull { it.name == fileName }
 
   /** Sanitizes a profile name into a safe file name (prevents path traversal / dupes). */
   private fun sanitizeProfileFileName(name: String): String =

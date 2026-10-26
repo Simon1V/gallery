@@ -36,6 +36,7 @@ import com.google.ai.edge.gallery.common.metrics.InferenceMetrics
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.SystemPromptProfileRepository
 import com.google.ai.edge.gallery.data.SystemPromptRepository
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.awaitInitialization
@@ -79,6 +80,7 @@ private const val TAG = "AGLlmChatViewModel"
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase(
   private val systemPromptRepository: SystemPromptRepository? = null,
+  private val systemPromptProfileRepository: SystemPromptProfileRepository? = null,
   private val modelFeedbackRepository: Any? = null,
   override val runtimeExecutor: AgentRuntimeExecutor,
   llmSessionManager: LlmSessionManager,
@@ -147,7 +149,11 @@ open class LlmChatViewModelBase(
     loadAutoCompact(task.id)
     viewModelScope.launch {
       val effectivePrompt =
-        SystemPromptHelper.getEffectiveSystemPrompt(systemPromptRepository, task)
+        SystemPromptHelper.getEffectiveSystemPrompt(
+          systemPromptRepository,
+          systemPromptProfileRepository,
+          task,
+        )
       _uiSystemPrompt.value = effectivePrompt
     }
   }
@@ -692,11 +698,12 @@ open class LlmChatViewModel
 @Inject
 constructor(
   systemPromptRepository: SystemPromptRepository,
+  systemPromptProfileRepository: SystemPromptProfileRepository,
   @AiChatExecutor runtimeExecutor: AgentRuntimeExecutor,
   llmSessionManager: LlmSessionManager,
   dataStoreRepository: DataStoreRepository? = null,
 ) :
-LlmChatViewModelBase(systemPromptRepository, null, runtimeExecutor,
+LlmChatViewModelBase(systemPromptRepository, systemPromptProfileRepository, null, runtimeExecutor,
 llmSessionManager, dataStoreRepository)
 
 @HiltViewModel
@@ -704,11 +711,12 @@ class LlmAskImageViewModel
 @Inject
 constructor(
   systemPromptRepository: SystemPromptRepository,
+  systemPromptProfileRepository: SystemPromptProfileRepository,
   @AiChatExecutor runtimeExecutor: AgentRuntimeExecutor,
   llmSessionManager: LlmSessionManager,
   dataStoreRepository: DataStoreRepository? = null,
 ) :
-LlmChatViewModelBase(systemPromptRepository, null, runtimeExecutor,
+LlmChatViewModelBase(systemPromptRepository, systemPromptProfileRepository, null, runtimeExecutor,
 llmSessionManager, dataStoreRepository)
 
 @HiltViewModel
@@ -716,9 +724,10 @@ class LlmAskAudioViewModel
 @Inject
 constructor(
   systemPromptRepository: SystemPromptRepository,
+  systemPromptProfileRepository: SystemPromptProfileRepository,
   @AiChatExecutor runtimeExecutor: AgentRuntimeExecutor,
   llmSessionManager: LlmSessionManager,
   dataStoreRepository: DataStoreRepository? = null,
 ) :
-LlmChatViewModelBase(systemPromptRepository, null, runtimeExecutor,
+LlmChatViewModelBase(systemPromptRepository, systemPromptProfileRepository, null, runtimeExecutor,
 llmSessionManager, dataStoreRepository)
