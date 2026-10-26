@@ -27,12 +27,14 @@ import android.util.Log
  *
  * Non-default profiles live as JSON files in the user-configured profile folder; the default
  * profile is bundled with the app (`assets/profiles/default.json`). The `version` field keeps
- * the file format extensible — future fields (e.g. sampler settings) can be added without
- * breaking old files, since unknown keys are ignored on parse.
+ * the file format extensible — `avatar` (v1.1.4) is the first such field; future fields (e.g.
+ * sampler settings) can be added without breaking old files, since unknown keys are ignored on
+ * parse.
  */
 data class SystemPromptProfile(
   @SerializedName("name") val name: String,
   @SerializedName("prompt") val prompt: String,
+  @SerializedName("avatar") val avatar: String? = null,
 ) {
   @SerializedName("version") val version: Int = 1
 
@@ -69,8 +71,18 @@ data class SystemPromptProfile(
       }
     }
 
-    /** Serializes a profile to its on-disk JSON form (versioned for future extension). */
-    fun serialize(name: String, prompt: String): String =
-      gson.toJson(SystemPromptProfile(name = name, prompt = prompt))
+    /**
+     * Serializes a profile to its on-disk JSON form (versioned for future extension).
+     * `avatar` (v1.1.4) is a content-URI string; the field is omitted from the file when
+     * null so avatar-less files stay clean and old files stay compatible.
+     */
+    fun serialize(name: String, prompt: String, avatar: String? = null): String {
+      val obj = org.json.JSONObject()
+      obj.put("name", name)
+      obj.put("prompt", prompt)
+      obj.put("version", 1)
+      if (avatar != null) obj.put("avatar", avatar)
+      return obj.toString()
+    }
   }
 }

@@ -38,6 +38,10 @@ import javax.inject.Singleton
  * names are tracked in the DataStore, so the folder can be listed without any tree query —
  * this makes profile read-back survive process restarts (the tree query only sees
  * in-memory, current-process children).
+ *
+ * v1.1.4 (chat avatars): profile files may carry an `avatar` field (a content-URI string of
+ * an image picked on the phone). All avatar re-serialization paths preserve the existing
+ * field; URI permissions are re-acquired at app start via [reAcquireUriPermission].
  */
 @Singleton
 open class SystemPromptProfileRepository
@@ -69,7 +73,15 @@ constructor(
    * survive process death). Safe to call even when no folder is set.
    */
   open fun reacquireFolderPermission() {
-    val uriString = getFolderUri() ?: return
+    getFolderUri()?.let { reAcquireUriPermission(it) }
+  }
+
+  /**
+   * Re-acquires a persisted URI permission after process restart. Used for the folder and
+   * avatar URIs (rows A10/U3 of the v1.1.4 state diagram); safe to call with any stored
+   * URI — failure is logged, never fatal.
+   */
+  open fun reAcquireUriPermission(uriString: String) {
     try {
       context.contentResolver.takePersistableUriPermission(
         Uri.parse(uriString),
@@ -77,7 +89,7 @@ constructor(
           android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
       )
     } catch (e: Exception) {
-      Log.w(TAG, "Failed to re-acquire folder permission: ${e.message}")
+      Log.w(TAG, "Failed to re-acquire permission for $uriString: ${e.message}")
     }
   }
 
@@ -187,13 +199,81 @@ constructor(
 
   /**
    * Overwrites the prompt of an existing profile file (write-back semantics: field edits go
-   * back into the file).
+   * back into the file). The file's existing `avatar` field (v1.1.4) is read first and
+   * preserved — a prompt-only OK must not clobber the avatar (state-diagram row A6).
    *
    * @return true if the file was written.
    */
   open fun updateProfilePrompt(name: String, prompt: String): Boolean {
     val uri = childUriFor(name) ?: return false
-    return writeDocumentText(uri, name, prompt)
+    val existing = readDocumentText(uri)?.let { SystemPromptProfile.parse(it) } ?: return false
+    return writeDocumentText(uri, name, prompt, existing.avatar)
+  }
+
+  /**
+   * Reads the avatar content-URI of the profile with the given [name] (v1.1.4), or null if
+   * the folder is unset/revoked, the file is missing/unreadable, or the file has no avatar.
+   */
+  open fun readProfileAvatar(name: String): String? {
+    val uri = childUriFor(name) ?: return null
+    val content = readDocumentText(uri) ?: return null
+    return SystemPromptProfile.parse(content)?.avatar
+  }
+
+  /**
+   * Sets (or, with null, clears) the avatar URI of an existing profile file, preserving its
+   * name and prompt (v1.1.4 rows A2/A8).
+   *
+   * @return true if the file was written.
+   */
+  open fun updateProfileAvatar(name: String, uri: String?): Boolean {
+    val childUri = childUriFor(name) ?: return false
+    val content = readDocumentText(childUri) ?: return false
+    val existing = SystemPromptProfile.parse(content) ?: return false
+    return writeDocumentText(childUri, existing.name, existing.prompt, uri)
+  }
+
+  // ---------------------------------------------------------------- avatar (v1.1.4)
+
+  private fun avatarKey(taskId: String) = "system_prompt_avatar_$taskId"
+
+  /**
+   * The content-URI of the active profile's avatar for [taskId] (v1.1.4), or null:
+   * file profile → the file's `avatar` field, falling back to the task's DataStore
+   * override; default/free-text → the DataStore key only. The DataStore key
+   * (`system_prompt_avatar_<taskId>`) is the task-level override written when the active
+   * selection is the bundled default or free text (rows A3/A4/A8).
+   */
+  open fun getActiveAvatarUri(taskId: String): String? {
+    val active = getActiveProfile(taskId)
+    val datastoreAvatar = dataStoreRepository.readSecret(avatarKey(taskId))
+    if (active == null || active == "default") return datastoreAvatar
+    return readProfileAvatar(active) ?: datastoreAvatar
+  }
+
+  /** Persists the task-level avatar override (rows A3/A4; null clears it, row A8). */
+  open fun saveActiveAvatarUri(taskId: String, uri: String?) {
+    if (uri == null) {
+      dataStoreRepository.deleteSecret(avatarKey(taskId))
+    } else {
+      dataStoreRepository.saveSecret(avatarKey(taskId), uri)
+    }
+  }
+
+  // ---------------------------------------------------------------- user avatar (global, v1.1.4)
+
+  private fun userAvatarKey() = "user_avatar_uri"
+
+  /** The global user-avatar image URI (one image for all tasks), or null if unset. */
+  open fun getUserAvatarUri(): String? = dataStoreRepository.readSecret(userAvatarKey())
+
+  /** Persists the global user-avatar URI (rows U1/U2; null clears it). */
+  open fun saveUserAvatarUri(uri: String?) {
+    if (uri == null) {
+      dataStoreRepository.deleteSecret(userAvatarKey())
+    } else {
+      dataStoreRepository.saveSecret(userAvatarKey(), uri)
+    }
   }
 
   /**
@@ -286,16 +366,22 @@ constructor(
     }
   }
 
-  /** Overwrites a document's content (`"w"` mode) with the profile's JSON. */
-  private fun writeDocumentText(uri: Uri, name: String, prompt: String): Boolean {
+  /** Overwrites a document's content (`"w"` mode) with the profile's JSON (v1.1.4: incl. the
+   * `avatar` field when present). */
+  private fun writeDocumentText(
+    uri: Uri,
+    name: String,
+    prompt: String,
+    avatar: String? = null,
+  ): Boolean {
     return try {
       val stream = context.contentResolver.openOutputStream(uri, "w")
       if (stream == null) {
         Log.w(TAG, "openOutputStream returned NULL for $uri (missing document or no permission)")
         return false
       }
-      stream.use { it.write(SystemPromptProfile.serialize(name, prompt).toByteArray()) }
-      Log.i(TAG, "Wrote profile '$name' to $uri")
+      stream.use { it.write(SystemPromptProfile.serialize(name, prompt, avatar).toByteArray()) }
+      Log.i(TAG, "Wrote profile '$name' to $uri (avatar=${if (avatar == null) "none" else avatar})")
       true
     } catch (e: Exception) {
       Log.e(TAG, "Failed to write profile '$name' to $uri: ${e.javaClass.simpleName}: ${e.message}")
