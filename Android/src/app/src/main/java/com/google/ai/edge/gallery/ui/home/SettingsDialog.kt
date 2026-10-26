@@ -33,13 +33,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.Button
@@ -98,6 +108,11 @@ fun SettingsDialog(
   curThemeOverride: Theme,
   modelManagerViewModel: ModelManagerViewModel,
   onDismissed: () -> Unit,
+  // v1.1.4: user avatar preview + callbacks (the picker is home-screen owned; this dialog
+  // only displays and routes the buttons — same pattern as the config dialog's AI avatar).
+  userAvatarUri: String? = null,
+  onAvatarChangeClicked: () -> Unit = {},
+  onAvatarRemoveClicked: () -> Unit = {},
 ) {
   var selectedTheme by remember { mutableStateOf(curThemeOverride) }
   var hfToken by remember { mutableStateOf(modelManagerViewModel.getTokenStatusAndData().data) }
@@ -149,6 +164,36 @@ fun SettingsDialog(
           verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
           val context = LocalContext.current
+          // v1.1.4: user avatar (one global image for all chat tasks; rows U1–U3).
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            AvatarCircle(uri = userAvatarUri, fallbackIcon = Icons.Rounded.Person)
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                stringResource(R.string.settings_user_avatar),
+                style = MaterialTheme.typography.labelMedium,
+              )
+              Text(
+                if (userAvatarUri != null) {
+                  stringResource(R.string.config_ai_avatar_set)
+                } else {
+                  stringResource(R.string.config_ai_avatar_not_set)
+                },
+                style = MaterialTheme.typography.bodySmall,
+              )
+            }
+            TextButton(onClick = onAvatarChangeClicked) {
+              Text(stringResource(R.string.config_change))
+            }
+            if (userAvatarUri != null) {
+              TextButton(onClick = onAvatarRemoveClicked) {
+                Text(stringResource(R.string.config_remove))
+              }
+            }
+          }
           // Theme switcher.
           Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
             Text(
@@ -370,3 +415,31 @@ private fun themeLabelRes(theme: Theme): Int =
     Theme.THEME_DARK -> R.string.theme_dark
     else -> R.string.unknown
   }
+
+/**
+ * v1.1.4: 40dp circular user-avatar preview for the settings dialog (same rendering as the
+ * chat sender rows: picked image over an icon fallback, so a revoked image degrades to the
+ * icon). Duplicated here because cross-file top-level imports don't resolve in this tree.
+ */
+@Composable
+private fun AvatarCircle(uri: String?, fallbackIcon: ImageVector) {
+  Box(
+    modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh).clip(CircleShape),
+    contentAlignment = Alignment.Center,
+  ) {
+    Icon(
+      imageVector = fallbackIcon,
+      contentDescription = null,
+      modifier = Modifier.size(40.dp),
+      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (uri != null) {
+      AsyncImage(
+        model = uri,
+        contentDescription = null,
+        modifier = Modifier.size(40.dp),
+        contentScale = ContentScale.Crop,
+      )
+    }
+  }
+}

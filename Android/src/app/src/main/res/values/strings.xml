@@ -100,6 +100,7 @@
   <string name="config_ai_avatar_not_set" translatable="true" description="Shown when no AI avatar image is set. [CHAR_LIMIT=22]">Not set</string>
   <string name="config_ai_avatar_set" translatable="true" description="Shown when an AI avatar image is set. [CHAR_LIMIT=22]">Set</string>
   <string name="config_remove" translatable="true" description="Button to remove the AI avatar image. [CHAR_LIMIT=22]">Remove</string>
+  <string name="settings_user_avatar" translatable="true" description="Label for the user avatar row in the home settings dialog. [CHAR_LIMIT=22]">User avatar</string>
   <string name="config_dialog_title" translatable="false" description="Title of the settings/configuration dialog. [CHAR_LIMIT=26]">Configurations</string>
   <string name="benchmark_config_dialog_title" translatable="true" description="Title of the benchmark configuration dialog. [CHAR_LIMIT=29]">Benchmark configs</string>
   <string name="start" translatable="true" description="Button label to start benchmarking. [CHAR_LIMIT=9]">Start</string>

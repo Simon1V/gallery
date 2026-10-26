@@ -24,7 +24,11 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import android.content.Intent
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
@@ -160,6 +164,8 @@ private val PREDEFINED_CATEGORY_ORDER = listOf(Category.LLM.id, Category.EXPERIM
 fun HomeScreen(
   modelManagerViewModel: ModelManagerViewModel,
   tosViewModel: TosViewModel,
+  // v1.1.4: user avatar persistence (the screen owns the picker; rows U1–U3).
+  userAvatarViewModel: UserAvatarViewModel = hiltViewModel(),
   navigateToTaskScreen: (Task) -> Unit,
   onModelsClicked: () -> Unit,
   onNotificationsClicked: () -> Unit,
@@ -169,6 +175,43 @@ fun HomeScreen(
   val uiState by modelManagerViewModel.uiState.collectAsState()
   var showSettingsDialog by remember { mutableStateOf(false) }
   var showTosDialog by remember { mutableStateOf(!tosViewModel.getIsTosAccepted()) }
+  // v1.1.4: user avatar URI (one global image for all chat tasks) + the image-only picker.
+  val userAvatarUri by userAvatarViewModel.userAvatarUri.collectAsState()
+  // `appContext` (not `context`): the 2026 tree has a `context` function that shadows the
+  // LocalContext value in name resolution, and .current is a composable call (no lambdas).
+  val appContext = LocalContext.current
+  LaunchedEffect(Unit) {
+    userAvatarViewModel.loadUserAvatar()
+  }
+  val userAvatarPickerLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.PickVisualMedia(),
+  ) {
+    uri ->
+    if (uri != null) {
+      val granted =
+        try {
+          appContext.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+          )
+          true
+        } catch (e: Exception) {
+          Log.w("UserAvatar", "takePersistableUriPermission threw: $e")
+          false
+        }
+      if (granted) {
+        // Row U1: written immediately on pick (no OK button in this dialog).
+        userAvatarViewModel.saveUserAvatar(uri.toString())
+        Log.d("UserAvatar", "picked + persisted: $uri")
+      } else {
+        Log.w("UserAvatar", "pick discarded (non-persistable URI): $uri")
+      }
+    }
+  }
+  val userAvatarPickerRequest =
+    PickVisualMediaRequest.Builder()
+      .setMediaType(ActivityResultContracts.PickVisualMedia.ImageOnly)
+      .build()
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
   val isDevBuild = context.packageName.endsWith(".dev")
@@ -496,6 +539,9 @@ fun HomeScreen(
       curThemeOverride = modelManagerViewModel.readThemeOverride(),
       modelManagerViewModel = modelManagerViewModel,
       onDismissed = { showSettingsDialog = false },
+      userAvatarUri = userAvatarUri,
+      onAvatarChangeClicked = { userAvatarPickerLauncher.launch(userAvatarPickerRequest) },
+      onAvatarRemoveClicked = { userAvatarViewModel.clearUserAvatar() },
     )
   }
 
