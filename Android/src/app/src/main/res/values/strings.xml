@@ -96,6 +96,10 @@
   <string name="config_add_profile" translatable="true" description="Button to add a new system-prompt profile. [CHAR_LIMIT=22]">Add profile</string>
   <string name="config_profile_name" translatable="true" description="Label for the new profile name field. [CHAR_LIMIT=22]">Profile name</string>
   <string name="config_profile_name_prompt" translatable="true" description="Hint above the profile name field in the add-profile dialog. [CHAR_LIMIT=80]">Name the new profile (letters, numbers, spaces)</string>
+  <string name="config_ai_avatar" translatable="true" description="Label for the AI avatar row in the config dialog. [CHAR_LIMIT=22]">AI avatar</string>
+  <string name="config_ai_avatar_not_set" translatable="true" description="Shown when no AI avatar image is set. [CHAR_LIMIT=22]">Not set</string>
+  <string name="config_ai_avatar_set" translatable="true" description="Shown when an AI avatar image is set. [CHAR_LIMIT=22]">Set</string>
+  <string name="config_remove" translatable="true" description="Button to remove the AI avatar image. [CHAR_LIMIT=22]">Remove</string>
   <string name="config_dialog_title" translatable="false" description="Title of the settings/configuration dialog. [CHAR_LIMIT=26]">Configurations</string>
   <string name="benchmark_config_dialog_title" translatable="true" description="Title of the benchmark configuration dialog. [CHAR_LIMIT=29]">Benchmark configs</string>
   <string name="start" translatable="true" description="Button label to start benchmarking. [CHAR_LIMIT=9]">Start</string>

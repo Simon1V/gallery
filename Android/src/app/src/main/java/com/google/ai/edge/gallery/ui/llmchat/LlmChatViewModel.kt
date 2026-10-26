@@ -292,6 +292,34 @@ open class LlmChatViewModelBase(
   }
 
   /**
+   * v1.1.4: applies the config dialog's pending avatar pick/clear (rows A2–A4, A8). Called
+   * by the screen right after a config OK, because the image picker is screen-owned; the
+   * dialog itself can't persist (it has no repository).
+   */
+  fun applyPendingAvatar(task: Task, pickedAvatarUri: String?, clearAvatar: Boolean) {
+    val repo = systemPromptProfileRepository ?: return
+    val profile = _activeProfile.value
+    if (profile == null || profile == "default") {
+      // Rows A3/A4/A8: DataStore override for default/free-text profiles.
+      applyAvatarOverride(task.id, pickedAvatarUri, clearAvatar)
+    } else {
+      // Rows A2/A8: file profile → avatar field in the profile file.
+      if (clearAvatar) {
+        val result = repo.updateProfileAvatar(profile, null)
+        Log.d(TAG, "applyPendingAvatar: file profile '$profile' avatar clear result=$result")
+      }
+      pickedAvatarUri?.let { picked ->
+        val result = repo.updateProfileAvatar(profile, picked)
+        Log.d(TAG, "applyPendingAvatar: file profile '$profile' avatar write result=$result")
+        if (result == false) {
+          Log.w(TAG, "avatar write FAILED for file profile '$profile' (folder/URI/permission?)")
+        }
+      }
+      _activeAvatarUri.value = repo.getActiveAvatarUri(task.id)
+    }
+  }
+
+  /**
    * v1.1.3: sets the active profile for the current task (used by the add-profile flow).
    */
   fun setActiveProfile(name: String?) {

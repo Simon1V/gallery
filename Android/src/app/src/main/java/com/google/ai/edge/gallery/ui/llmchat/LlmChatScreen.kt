@@ -29,8 +29,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -274,6 +276,18 @@ fun ChatViewWrapper(
   var showAddProfileDialog by remember { mutableStateOf(false) }
   var newProfileName by remember { mutableStateOf("") }
 
+  // v1.1.4: avatar state — the screen owns the image picker (launchers can't live in the
+  // config Dialog window); the pending pick/clear is applied after a config OK (A2–A4, A8).
+  val activeAvatar by viewModel.activeAvatarUri.collectAsState()
+  val userAvatar by viewModel.userAvatarUri.collectAsState()
+  var pendingAvatarUri by remember { mutableStateOf<String?>(null) }
+  var pendingAvatarClear by remember { mutableStateOf(false) }
+  // v1.1.4: image-only media request for the avatar picker (rows A1, A2).
+  val avatarPickerRequest =
+    PickVisualMediaRequest.Builder()
+      .setMediaType(ActivityResultContracts.PickVisualMedia.ImageOnly)
+      .build()
+
   LaunchedEffect(task.id) {
     if (profileRepo != null) {
       withContext(Dispatchers.IO) {
@@ -286,13 +300,23 @@ fun ChatViewWrapper(
 
   // v1.1.3: after every config-dialog OK the VM bumps configOkCount — re-read the profile
   // list + folder name so the picker, field and folder row all reflect the just-persisted
-  // state on the next open (write-back reload).
+  // state on the next open (write-back reload). v1.1.4: also apply the pending avatar
+  // pick/clear here (rows A2–A4, A8), then clear it (A11: the VM re-read updates the UI).
   LaunchedEffect(configOkCount) {
-    if (configOkCount > 0 && profileRepo != null) {
-      withContext(Dispatchers.IO) {
-        val uriString = profileRepo.getFolderUri()
-        folderName = if (uriString != null) profileFolderDisplayName(context, uriString) else null
-        profileTexts = profileRepo.listProfiles().associate { it.name to it.prompt }
+    if (configOkCount > 0) {
+      if (profileRepo != null) {
+        withContext(Dispatchers.IO) {
+          val uriString = profileRepo.getFolderUri()
+          folderName = if (uriString != null) profileFolderDisplayName(context, uriString) else null
+          profileTexts = profileRepo.listProfiles().associate { it.name to it.prompt }
+        }
+      }
+      if (pendingAvatarUri != null || pendingAvatarClear) {
+        withContext(Dispatchers.IO) {
+          viewModel.applyPendingAvatar(task, pendingAvatarUri, pendingAvatarClear)
+        }
+        pendingAvatarUri = null
+        pendingAvatarClear = false
       }
     }
   }
@@ -314,6 +338,33 @@ fun ChatViewWrapper(
         if (pendingProfilePrompt != null) {
           showAddProfileDialog = true
         }
+      }
+    }
+  }
+
+  // v1.1.4: AI avatar image picker (screen-owned; rows A1, A2). A non-persistable pick is
+  // discarded (log + no pending state) rather than stored, since it would die on restart.
+  val avatarPickerLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.PickVisualMedia(),
+  ) {
+    uri ->
+    if (uri != null) {
+      val granted =
+        try {
+          context.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+          )
+          true
+        } catch (e: Exception) {
+          Log.w("ProfileAdd", "avatar: takePersistableUriPermission threw: $e")
+          false
+        }
+      if (granted) {
+        pendingAvatarUri = uri.toString()
+        Log.d("ProfileAdd", "avatar picked + persisted: $uri")
+      } else {
+        Log.w("ProfileAdd", "avatar pick discarded (non-persistable URI): $uri")
       }
     }
   }
@@ -490,6 +541,16 @@ fun ChatViewWrapper(
         Log.d("ProfileAdd", "→ folder set: opening name dialog")
         showAddProfileDialog = true
       }
+    },
+    agentAvatarUri = activeAvatar,
+    userAvatarUri = userAvatar,
+    avatarPreviewUri = pendingAvatarUri ?: activeAvatar,
+    onAvatarChangeClicked = { avatarPickerLauncher.launch(avatarPickerRequest) },
+    onAvatarRemoveClicked = { pendingAvatarClear = true },
+    onConfigOpened = {
+      // Rows A5/A9: reopening the dialog clears any stale pending avatar state.
+      pendingAvatarUri = null
+      pendingAvatarClear = false
     },
     sendMessageTrigger = sendMessageTrigger,
     showAudioPicker = showAudioPicker,

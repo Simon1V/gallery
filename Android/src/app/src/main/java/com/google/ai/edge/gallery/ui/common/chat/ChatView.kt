@@ -141,6 +141,12 @@ fun ChatView(
   folderName: String? = null,
   onChangeFolderClicked: () -> Unit = {},
   onAddProfileClicked: (String) -> Unit = { _ -> },
+  // v1.1.4: AI avatar preview + callbacks (picker is screen-owned); onConfigOpened fires
+  // when the config dialog opens (the screen uses it to clear stale pending avatar state).
+  avatarPreviewUri: String? = null,
+  onAvatarChangeClicked: () -> Unit = {},
+  onAvatarRemoveClicked: () -> Unit = {},
+  onConfigOpened: () -> Unit = {},
   // v1.1.4: avatar image URIs for the sender rows (null = icon fallback).
   agentAvatarUri: String? = null,
   userAvatarUri: String? = null,
@@ -349,6 +355,10 @@ fun ChatView(
               folderName = folderName,
               onChangeFolderClicked = onChangeFolderClicked,
               onAddProfileClicked = onAddProfileClicked,
+              avatarPreviewUri = avatarPreviewUri,
+              onAvatarChangeClicked = onAvatarChangeClicked,
+              onAvatarRemoveClicked = onAvatarRemoveClicked,
+              onConfigOpened = onConfigOpened,
               onHistoryClicked = {
                 Log.d(
                   TAG,

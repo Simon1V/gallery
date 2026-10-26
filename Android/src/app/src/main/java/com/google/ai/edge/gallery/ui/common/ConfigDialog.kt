@@ -21,6 +21,7 @@ package com.google.ai.edge.gallery.ui.common
 // import com.google.ai.edge.gallery.ui.theme.GalleryTheme
 import android.util.Log
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,7 +56,12 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
@@ -159,6 +165,11 @@ fun ConfigDialog(
   folderName: String? = null,
   onChangeFolderClicked: () -> Unit = {},
   onAddProfileClicked: (String) -> Unit = { _ -> },
+  // v1.1.4: AI avatar — preview URI shown in the tab (null = icon fallback); the picker
+  // itself is screen-owned (launchers can't live in this Dialog window).
+  avatarPreviewUri: String? = null,
+  onAvatarChangeClicked: () -> Unit = {},
+  onAvatarRemoveClicked: () -> Unit = {},
 ) {
   val values: SnapshotStateMap<String, Any> = remember {
     mutableStateMapOf<String, Any>().apply {
@@ -338,6 +349,36 @@ fun ConfigDialog(
                 }
                 TextButton(onClick = onChangeFolderClicked) {
                   Text(stringResource(R.string.config_change))
+                }
+              }
+              // 5. AI avatar (v1.1.4): preview circle + Change (and Remove if one is set).
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                AvatarCircle(uri = avatarPreviewUri, fallbackIcon = Icons.Rounded.SmartToy)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    stringResource(R.string.config_ai_avatar),
+                    style = MaterialTheme.typography.labelMedium,
+                  )
+                  Text(
+                    if (avatarPreviewUri != null) {
+                      stringResource(R.string.config_ai_avatar_set)
+                    } else {
+                      stringResource(R.string.config_ai_avatar_not_set)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                  )
+                }
+                TextButton(onClick = onAvatarChangeClicked) {
+                  Text(stringResource(R.string.config_change))
+                }
+                if (avatarPreviewUri != null) {
+                  TextButton(onClick = onAvatarRemoveClicked) {
+                    Text(stringResource(R.string.config_remove))
+                  }
                 }
               }
             }
@@ -966,5 +1007,32 @@ private fun ProfilePickerRow(
       Icon(Icons.Rounded.CheckCircle, contentDescription = null)
     }
     Text(label, modifier = Modifier.weight(1f))
+  }
+}
+
+/**
+ * v1.1.4: 40dp circular AI-avatar preview for the config dialog (same rendering as the chat
+ * sender rows: picked image over an icon fallback, so a revoked image degrades to the icon).
+ */
+@Composable
+private fun AvatarCircle(uri: String?, fallbackIcon: ImageVector) {
+  Box(
+    modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh).clip(CircleShape),
+    contentAlignment = Alignment.Center,
+  ) {
+    Icon(
+      imageVector = fallbackIcon,
+      contentDescription = null,
+      modifier = Modifier.size(40.dp),
+      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (uri != null) {
+      AsyncImage(
+        model = uri,
+        contentDescription = null,
+        modifier = Modifier.size(40.dp),
+        contentScale = ContentScale.Crop,
+      )
+    }
   }
 }

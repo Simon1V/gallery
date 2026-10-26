@@ -233,7 +233,7 @@ private fun getMessageLayoutConfig(
  * icon fallback, so a revoked/unloadable image degrades to the icon (no crash, no blank face).
  */
 @Composable
-private fun AvatarCircle(uri: String?, fallbackIcon: ImageVector) {
+fun AvatarCircle(uri: String?, fallbackIcon: ImageVector) {
   Box(
     modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh).clip(CircleShape),
     contentAlignment = Alignment.Center,

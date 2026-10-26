@@ -97,6 +97,12 @@ fun ModelPageAppBar(
   shouldShowHistoryButton: Boolean = false,
   onHistoryClicked: (Model) -> Unit = {},
   isAutoCompactEnabled: Boolean = false,
+  // v1.1.4: AI avatar preview + callbacks (picker is screen-owned); onConfigOpened fires
+  // when the config dialog opens (the screen uses it to clear stale pending avatar state).
+  avatarPreviewUri: String? = null,
+  onAvatarChangeClicked: () -> Unit = {},
+  onAvatarRemoveClicked: () -> Unit = {},
+  onConfigOpened: () -> Unit = {},
 ) {
   var showConfigDialog by remember { mutableStateOf(false) }
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsStateWithLifecycle()
@@ -163,7 +169,7 @@ fun ModelPageAppBar(
         if (showConfigButton) {
           val enableConfigButton = !isModelInitializing && !inProgress && isModelInitialized
           IconButton(
-            onClick = { showConfigDialog = true },
+            onClick = { showConfigDialog = true; onConfigOpened() },
             enabled = enableConfigButton,
             modifier =
               Modifier.offset(x = configButtonOffset).alpha(if (!enableConfigButton) 0.5f else 1f),
@@ -384,6 +390,9 @@ fun ModelPageAppBar(
       folderName = folderName,
       onChangeFolderClicked = onChangeFolderClicked,
       onAddProfileClicked = onAddProfileClicked,
+      avatarPreviewUri = avatarPreviewUri,
+      onAvatarChangeClicked = onAvatarChangeClicked,
+      onAvatarRemoveClicked = onAvatarRemoveClicked,
     )
   }
 }
