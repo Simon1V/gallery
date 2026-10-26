@@ -244,6 +244,64 @@ single engine-side summary message not present in the app UI history — so the 
 estimate covers only the turn's own tokens and the Context row under-counts the re-prefilled
 summary until the engine exposes message rendering at reset time (upstream gap).
 
+### G. System Prompt Selector (v1.1.3, 2026-10-26)
+
+System prompts became **named profiles**: the **default** profile ships with the app
+(`assets/profiles/default.json` — the AI-Chat persona; a task's own default is used when
+the asset is blank), and every other profile is a **JSON file** in a user-chosen folder
+(SAF folder picker, one global folder for all tasks; profile files are extensible —
+`{version, name, prompt}`, room for sampler settings later). The config dialog's System-prompt
+tab now has: a profile **selector** (dialog picker with solid `Surface` background), a
+taller prompt field, **Restore default** + **Add profile** buttons, and a **profile-folder**
+row with **Change** (SAF picker; the launcher lives in the screen, not the `Dialog`).
+
+**Save semantics (state diagram) on config-dialog OK** (`LlmChatViewModel.applySystemPromptChange`):
+
+| Active selection | OK does |
+|---|---|
+| Free text (`selectedProfile == null`) | DataStore custom prompt := field text (v1.1.0 behavior); active profile cleared |
+| Default, field edited | DataStore override := field text (the asset is read-only); active profile cleared |
+| Default, unedited | active profile := `"default"` (no write) |
+| File profile `P` (any) | **`P.json` := field text — always, unconditionally** (write-back; the file is the source of truth); active profile := `P`; result logged, never silent |
+
+Then `resetSession` + `configOkCount++`; the screen re-reads the profile list + folder name
+(`LaunchedEffect(configOkCount)` in `LlmChatScreen`), so every UI element (picker rows,
+field, folder row, selector label) reflects the just-persisted state on the next open.
+
+**2026 API-37 SAF findings (the repository was rewritten accordingly — no `DocumentFile`
+at all):**
+
+1. `ContentResolver.insert()` on SAF tree URIs is **unsupported** by the 2026 storage
+   provider (it neither implements it nor handles it) → child documents are created with
+   `DocumentsContract.createDocument(resolver, parentDocumentUri, mimeType, displayName)`,
+   parent = `buildDocumentUriUsingTree(treeUri, treeUri.lastPathSegment)` (the tree's root
+   document). File *content* is then written via a direct `openOutputStream(createdUri, "w")`
+   (single-document operations are supported).
+2. The provider's child document id uses a **`/` (slash) separator** —
+   `primary:Download/Test/bot33.json` — *not* the classic `treeId:childId` colon form that
+   `buildDocumentUriUsingTree` emits. A child URI built with the colon form references a
+   document id the provider doesn't have → streams return null. Fix: persist the provider's
+   own `createdUri` per profile (DataStore `system_profile_uri_<name>`); for files created by
+   older builds, reconstruct the 2026 pattern — the full id `treeId/childId` must be **one
+   percent-encoded path segment** (`:` → `%3A`, `/` → `%2F`); a raw `/` inside the URI string
+   splits it into extra segments and the provider can't resolve it.
+3. The provider's **tree `query()`** (the mechanism behind `DocumentFile` 1.0.1
+   `listFiles()`/`findFile()`) returns only **in-memory, current-process** children — files
+   created in an earlier app session are invisible to it. So listing/reading/writing must
+   go through arithmetic single-document URIs + direct resolver streams; created profile
+   **names are tracked in the DataStore** (`system_profile_names`), which is how
+   `listProfiles()` works across process restarts without any tree query.
+4. SAF grants don't survive process death → `takePersistableUriPermission` (note: *Persistable*,
+   the 2026 name) re-acquires the folder permission at startup (`reacquireFolderPermission`).
+5. **Proto-DataStore cold-start race:** `data.first()` at process start returns the default
+   (empty) state before the on-disk file is parsed. `DataStoreRepository.readSecret` now
+   re-reads once (after `delay(500)`) when the first read is null — otherwise startup reads
+   (folder URI, prompts, flags) silently see empty state.
+
+On-device (Pixel 8a): all combinations verified — create new profile, update its description
+later, switch profiles, reload descriptions after restart; picker lists all profiles; write-back
+survives close/reopen and app restarts.
+
 ## Known limitations
 
 - When online, the in-memory model list shown at launch is the **build-time snapshot**;
