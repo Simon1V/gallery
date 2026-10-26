@@ -20,20 +20,31 @@ package com.google.ai.edge.gallery.ui.common.chat
 // import com.google.ai.edge.gallery.ui.theme.GalleryTheme
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.SmartToy
+import coil.compose.AsyncImage
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.ui.theme.bodySmallNarrow
 
@@ -50,9 +61,18 @@ data class MessageLayoutConfig(
  * This function handles different types of chat messages, including system messages, benchmark
  * results, and image generation results, and displays the appropriate sender label and status
  * information.
+ *
+ * v1.1.4: `agentAvatarUri` / `userAvatarUri` are content-URI strings of the picked avatar
+ * images; null means the icon fallback circle is shown (both sides always have a face).
  */
 @Composable
-fun MessageSender(message: ChatMessage, agentName: String = "", imageHistoryCurIndex: Int = 0) {
+fun MessageSender(
+  message: ChatMessage,
+  agentName: String = "",
+  imageHistoryCurIndex: Int = 0,
+  agentAvatarUri: String? = null,
+  userAvatarUri: String? = null,
+) {
   // No user label for system messages.
   if (message.side == ChatSide.SYSTEM) {
     return
@@ -70,6 +90,18 @@ fun MessageSender(message: ChatMessage, agentName: String = "", imageHistoryCurI
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = horizontalArrangement,
   ) {
+    // v1.1.4: sender avatar (picked image, or icon fallback) — both sides always have a face.
+    val avatarUri = if (message.side == ChatSide.USER) userAvatarUri else agentAvatarUri
+    AvatarCircle(
+      uri = avatarUri,
+      fallbackIcon =
+        if (message.side == ChatSide.USER) {
+          Icons.Rounded.Person
+        } else {
+          Icons.Rounded.SmartToy
+        },
+    )
+    Spacer(modifier = Modifier.width(8.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
       // Sender label.
       Text(userLabel, style = MaterialTheme.typography.titleSmall)
@@ -194,6 +226,35 @@ private fun getMessageLayoutConfig(
     userLabel = userLabel,
     rightSideLabel = rightSideLabel,
   )
+}
+
+/**
+ * v1.1.4: 40dp circular sender avatar. A picked image (content URI) is drawn on top of the
+ * icon fallback, so a revoked/unloadable image degrades to the icon (no crash, no blank face).
+ */
+@Composable
+private fun AvatarCircle(uri: String?, fallbackIcon: ImageVector) {
+  Box(
+    modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh).clip(CircleShape),
+    contentAlignment = Alignment.Center,
+  ) {
+    Icon(
+      imageVector = fallbackIcon,
+      contentDescription = null,
+      modifier = Modifier.size(40.dp),
+      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (uri != null) {
+      // Coil 2.7: no `uri()` helper (removed since Coil 1) — the raw content-URI string is
+      // parsed by Coil's default URI parser into a ContentUri (fetched via ContentUriFetcher).
+      AsyncImage(
+        model = uri,
+        contentDescription = null,
+        modifier = Modifier.size(40.dp),
+        contentScale = ContentScale.Crop,
+      )
+    }
+  }
 }
 
 // @Preview(showBackground = true)

@@ -141,6 +141,9 @@ fun ChatView(
   folderName: String? = null,
   onChangeFolderClicked: () -> Unit = {},
   onAddProfileClicked: (String) -> Unit = { _ -> },
+  // v1.1.4: avatar image URIs for the sender rows (null = icon fallback).
+  agentAvatarUri: String? = null,
+  userAvatarUri: String? = null,
   sendMessageTrigger: SendMessageTrigger? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
@@ -415,6 +418,8 @@ fun ChatView(
                       showAudioPicker = showAudioPicker,
                       emptyStateComposable = emptyStateComposable,
                       onNewChatClicked = onNewChatClicked,
+                      agentAvatarUri = agentAvatarUri,
+                      userAvatarUri = userAvatarUri,
                     )
                   // Model download
                   false ->

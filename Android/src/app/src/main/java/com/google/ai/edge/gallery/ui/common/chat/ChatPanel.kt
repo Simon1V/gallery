@@ -158,6 +158,9 @@ fun ChatPanel(
   showAudioPicker: Boolean = false,
   emptyStateComposable: @Composable (Model) -> Unit = {},
   onNewChatClicked: () -> Unit = {},
+  // v1.1.4: avatar image URIs for the sender rows (null = icon fallback).
+  agentAvatarUri: String? = null,
+  userAvatarUri: String? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
   val messages = uiState.messagesByModel[selectedModel.name] ?: listOf()
@@ -474,6 +477,8 @@ fun ChatPanel(
                     message = message,
                     agentName = agentName,
                     imageHistoryCurIndex = imageHistoryCurIndex.intValue,
+                    agentAvatarUri = agentAvatarUri,
+                    userAvatarUri = userAvatarUri,
                   )
               }
 

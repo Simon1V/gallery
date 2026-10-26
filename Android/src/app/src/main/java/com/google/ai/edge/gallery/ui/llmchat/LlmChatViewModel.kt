@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 private const val TAG = "AGLlmChatViewModel"
@@ -91,6 +92,14 @@ open class LlmChatViewModelBase(
   // v1.1.3: active system-prompt profile (null = free-text mode).
   private val _activeProfile = MutableStateFlow<String?>(null)
   val activeProfile: StateFlow<String?> = _activeProfile.asStateFlow()
+
+  // v1.1.4: active profile's avatar image URI (null = icon fallback in the sender row).
+  private val _activeAvatarUri = MutableStateFlow<String?>(null)
+  val activeAvatarUri: StateFlow<String?> = _activeAvatarUri.asStateFlow()
+
+  // v1.1.4: global user avatar image URI (one image for all tasks; null = icon fallback).
+  private val _userAvatarUri = MutableStateFlow<String?>(null)
+  val userAvatarUri: StateFlow<String?> = _userAvatarUri.asStateFlow()
 
   // v1.1.3: increments on every config-dialog OK, so the screen can re-read the profile
   // list + folder name and all UI reloads to reflect the just-persisted state.
@@ -166,6 +175,15 @@ open class LlmChatViewModelBase(
         )
       _uiSystemPrompt.value = effectivePrompt
       _activeProfile.value = systemPromptProfileRepository?.getActiveProfile(task.id)
+      // v1.1.4: re-acquire + load the avatar URIs (rows A10/U3) so avatars survive restarts.
+      withContext(Dispatchers.IO) {
+        systemPromptProfileRepository?.let { repo ->
+          repo.getActiveAvatarUri(task.id)?.let { repo.reAcquireUriPermission(it) }
+          repo.getUserAvatarUri()?.let { repo.reAcquireUriPermission(it) }
+          _activeAvatarUri.value = repo.getActiveAvatarUri(task.id)
+          _userAvatarUri.value = repo.getUserAvatarUri()
+        }
+      }
     }
   }
 
@@ -187,6 +205,10 @@ open class LlmChatViewModelBase(
     newPrompt: String,
     systemPromptUpdatedMessage: String,
     selectedProfile: String? = null,
+    // v1.1.4: avatar picked in the config dialog (null = no pick this OK); `clearAvatar`
+    // (Remove tapped) wins over a pick (rows A2–A4, A8).
+    pickedAvatarUri: String? = null,
+    clearAvatar: Boolean = false,
   ) {
     val oldPrompt = _uiSystemPrompt.value
     val edited = newPrompt != oldPrompt
@@ -198,6 +220,7 @@ open class LlmChatViewModelBase(
           systemPromptRepository?.updateSystemPrompt(task.id, newPrompt)
           systemPromptProfileRepository?.setActiveProfile(task.id, null)
           _activeProfile.value = null
+          applyAvatarOverride(task.id, pickedAvatarUri, clearAvatar)
         }
         selectedProfile == "default" -> {
           if (edited) {
@@ -209,6 +232,7 @@ open class LlmChatViewModelBase(
             systemPromptProfileRepository?.setActiveProfile(task.id, "default")
             _activeProfile.value = "default"
           }
+          applyAvatarOverride(task.id, pickedAvatarUri, clearAvatar)
         }
         else -> {
           // File profile: OK ALWAYS writes the field text back into the profile file
@@ -224,8 +248,24 @@ open class LlmChatViewModelBase(
           }
           systemPromptProfileRepository?.setActiveProfile(task.id, selectedProfile)
           _activeProfile.value = selectedProfile
+          // v1.1.4 rows A2/A8: avatar pick goes into the profile file; Remove clears it.
+          if (clearAvatar) {
+            val result = systemPromptProfileRepository?.updateProfileAvatar(selectedProfile, null)
+            Log.d(TAG, "applySystemPromptChange: file profile '$selectedProfile' avatar clear result=$result")
+          }
+          pickedAvatarUri?.let { picked ->
+            val result = systemPromptProfileRepository?.updateProfileAvatar(selectedProfile, picked)
+            Log.d(TAG, "applySystemPromptChange: file profile '$selectedProfile' avatar write result=$result")
+            if (result == false) {
+              Log.w(TAG, "avatar write-back FAILED for file profile '$selectedProfile' (folder/URI/permission?)")
+            }
+          }
         }
       }
+      // v1.1.4: single source of truth — re-read the persisted avatar after all writes
+      // (rows A2–A4, A8, A11).
+      _activeAvatarUri.value =
+        systemPromptProfileRepository?.getActiveAvatarUri(task.id)
       _configOkCount.value = _configOkCount.value + 1
       resetSession(
         task = task,
@@ -236,6 +276,19 @@ open class LlmChatViewModelBase(
         onDone = { addMessage(model, ChatMessageInfo(content = systemPromptUpdatedMessage)) },
       )
     }
+  }
+
+  /**
+   * v1.1.4: applies the dialog's avatar pick/clear to the task-level DataStore override
+   * (rows A3/A4/A8) and re-reads the active avatar URI (single source of truth).
+   */
+  private fun applyAvatarOverride(taskId: String, pickedAvatarUri: String?, clearAvatar: Boolean) {
+    if (clearAvatar) {
+      systemPromptProfileRepository?.saveActiveAvatarUri(taskId, null)
+    } else {
+      pickedAvatarUri?.let { systemPromptProfileRepository?.saveActiveAvatarUri(taskId, it) }
+    }
+    _activeAvatarUri.value = systemPromptProfileRepository?.getActiveAvatarUri(taskId)
   }
 
   /**
