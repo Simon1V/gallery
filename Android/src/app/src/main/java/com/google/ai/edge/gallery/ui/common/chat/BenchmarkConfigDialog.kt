@@ -74,7 +74,7 @@ fun BenchmarkConfigDialog(
     configs = BENCHMARK_CONFIGS,
     initialValues = BENCHMARK_CONFIGS_INITIAL_VALUES,
     onDismissed = onDismissed,
-    onOk = { curConfigValues, _, _ ->
+    onOk = { curConfigValues, _, _, _ ->
       // Hide config dialog.
       onDismissed()
 

@@ -135,7 +135,12 @@ fun ChatView(
   emptyStateComposable: @Composable (Model) -> Unit = {},
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
-  onSystemPromptChanged: (String) -> Unit = {},
+  onSystemPromptChanged: (String, String?) -> Unit = { _, _ -> },
+  activeProfileName: String? = null,
+  profileTexts: Map<String, String> = emptyMap(),
+  folderName: String? = null,
+  onChangeFolderClicked: () -> Unit = {},
+  onAddProfileClicked: (String) -> Unit = { _ -> },
   sendMessageTrigger: SendMessageTrigger? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
@@ -336,6 +341,11 @@ fun ChatView(
               allowEditingSystemPrompt = allowEditingSystemPrompt,
               curSystemPrompt = curSystemPrompt,
               onSystemPromptChanged = onSystemPromptChanged,
+              activeProfileName = activeProfileName,
+              profileTexts = profileTexts,
+              folderName = folderName,
+              onChangeFolderClicked = onChangeFolderClicked,
+              onAddProfileClicked = onAddProfileClicked,
               onHistoryClicked = {
                 Log.d(
                   TAG,

@@ -331,7 +331,7 @@ fun GalleryNavHost(
                 customPromptProvider?.invoke() ?: customTask.task.defaultSystemPrompt,
               defaultSystemPrompt =
                 customDefaultPromptProvider?.invoke() ?: customTask.task.defaultSystemPrompt,
-              onSystemPromptChanged = { newPrompt -> customOnPromptChanged?.invoke(newPrompt) },
+              onSystemPromptChanged = { newPrompt, _ -> customOnPromptChanged?.invoke(newPrompt) },
               onHistoryClicked = customHistoryClickHandler,
             ) { bottomPadding ->
               customTask.MainScreen(
@@ -523,7 +523,7 @@ private fun CustomTaskScreen(
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
   defaultSystemPrompt: String = task.defaultSystemPrompt,
-  onSystemPromptChanged: (String) -> Unit = {},
+  onSystemPromptChanged: (String, String?) -> Unit = { _, _ -> },
   onHistoryClicked: (() -> Unit)? = null,
   content: @Composable (bottomPadding: Dp) -> Unit,
 ) {

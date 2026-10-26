@@ -149,13 +149,14 @@ abstract class BaseLlmChatTask(
       curSystemPrompt = uiSystemPrompt,
       showImagePicker = true,
       showAudioPicker = true,
-      onSystemPromptChanged = { newPrompt ->
+      onSystemPromptChanged = { newPrompt, selectedProfile ->
         val selectedModel = myData.modelManagerViewModel.uiState.value.selectedModel
         viewModel.applySystemPromptChange(
           task = task,
           model = selectedModel,
           newPrompt = newPrompt,
           systemPromptUpdatedMessage = systemPromptUpdatedMessage,
+          selectedProfile = selectedProfile,
         )
       },
       emptyStateComposable = { model ->
@@ -313,13 +314,14 @@ constructor(
       viewModel = viewModel,
       allowEditingSystemPrompt = true,
       curSystemPrompt = uiSystemPrompt,
-      onSystemPromptChanged = { newPrompt ->
+      onSystemPromptChanged = { newPrompt, selectedProfile ->
         val selectedModel = myData.modelManagerViewModel.uiState.value.selectedModel
         viewModel.applySystemPromptChange(
           task = task,
           model = selectedModel,
           newPrompt = newPrompt,
           systemPromptUpdatedMessage = systemPromptUpdatedMessage,
+          selectedProfile = selectedProfile,
         )
       },
     )
@@ -408,13 +410,14 @@ constructor(
       viewModel = viewModel,
       allowEditingSystemPrompt = true,
       curSystemPrompt = uiSystemPrompt,
-      onSystemPromptChanged = { newPrompt ->
+      onSystemPromptChanged = { newPrompt, selectedProfile ->
         val selectedModel = myData.modelManagerViewModel.uiState.value.selectedModel
         viewModel.applySystemPromptChange(
           task = task,
           model = selectedModel,
           newPrompt = newPrompt,
           systemPromptUpdatedMessage = systemPromptUpdatedMessage,
+          selectedProfile = selectedProfile,
         )
       },
     )

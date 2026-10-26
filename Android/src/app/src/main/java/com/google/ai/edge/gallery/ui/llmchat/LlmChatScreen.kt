@@ -27,10 +27,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,10 +70,13 @@ import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.emptyStateContent
 import com.google.ai.edge.gallery.ui.theme.emptyStateTitle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.collectAsState
 
 private const val TAG = "AGLlmChatScreen"
 
@@ -84,7 +95,7 @@ fun LlmChatScreen(
   viewModel: LlmChatViewModel = hiltViewModel(),
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
-  onSystemPromptChanged: (String) -> Unit = {},
+  onSystemPromptChanged: (String, String?) -> Unit = { _, _ -> },
   emptyStateComposable: @Composable (Model) -> Unit = {},
   sendMessageTrigger: SendMessageTrigger? = null,
   showImagePicker: Boolean = false,
@@ -128,7 +139,7 @@ fun LlmAskImageScreen(
   viewModel: LlmAskImageViewModel = hiltViewModel(),
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
-  onSystemPromptChanged: (String) -> Unit = {},
+  onSystemPromptChanged: (String, String?) -> Unit = { _, _ -> },
 ) {
   ChatViewWrapper(
     viewModel = viewModel,
@@ -182,7 +193,7 @@ fun LlmAskAudioScreen(
   viewModel: LlmAskAudioViewModel = hiltViewModel(),
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
-  onSystemPromptChanged: (String) -> Unit = {},
+  onSystemPromptChanged: (String, String?) -> Unit = { _, _ -> },
 ) {
   ChatViewWrapper(
     viewModel = viewModel,
@@ -238,7 +249,7 @@ fun ChatViewWrapper(
   emptyStateComposable: @Composable (Model) -> Unit = {},
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
-  onSystemPromptChanged: (String) -> Unit = {},
+  onSystemPromptChanged: (String, String?) -> Unit = { _, _ -> },
   sendMessageTrigger: SendMessageTrigger? = null,
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
@@ -252,7 +263,63 @@ fun ChatViewWrapper(
   val scope = rememberCoroutineScope()
   var sessionRestoreJob by remember { mutableStateOf<Job?>(null) }
 
-  ChatView(
+  // v1.1.3: system-prompt profile state — the screen owns the SAF picker and the
+  // add-profile flow (ActivityResult launchers can't live inside the config Dialog).
+  val activeProfile by viewModel.activeProfile.collectAsState()
+  val configOkCount by viewModel.configOkCount.collectAsState()
+  val profileRepo = viewModel.profileRepository
+  var folderName by remember { mutableStateOf<String?>(null) }
+  var profileTexts by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+  var pendingProfilePrompt by remember { mutableStateOf<String?>(null) }
+  var showAddProfileDialog by remember { mutableStateOf(false) }
+  var newProfileName by remember { mutableStateOf("") }
+
+  LaunchedEffect(task.id) {
+    if (profileRepo != null) {
+      withContext(Dispatchers.IO) {
+        val uriString = profileRepo.getFolderUri()
+        folderName = if (uriString != null) profileFolderDisplayName(context, uriString) else null
+        profileTexts = profileRepo.listProfiles().associate { it.name to it.prompt }
+      }
+    }
+  }
+
+  // v1.1.3: after every config-dialog OK the VM bumps configOkCount — re-read the profile
+  // list + folder name so the picker, field and folder row all reflect the just-persisted
+  // state on the next open (write-back reload).
+  LaunchedEffect(configOkCount) {
+    if (configOkCount > 0 && profileRepo != null) {
+      withContext(Dispatchers.IO) {
+        val uriString = profileRepo.getFolderUri()
+        folderName = if (uriString != null) profileFolderDisplayName(context, uriString) else null
+        profileTexts = profileRepo.listProfiles().associate { it.name to it.prompt }
+      }
+    }
+  }
+
+  val folderPickerLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.OpenDocumentTree(),
+  ) {
+    uri ->
+    Log.d("ProfileAdd", "picker result: uri=$uri, repo=${profileRepo != null}")
+    if (uri != null && profileRepo != null) {
+      profileRepo.saveFolderUri(uri.toString())
+      profileRepo.reacquireFolderPermission()
+      scope.launch {
+        withContext(Dispatchers.IO) {
+          folderName = profileFolderDisplayName(context, uri.toString())
+          profileTexts = profileRepo.listProfiles().associate { it.name to it.prompt }
+        }
+        // If the user came from "Add profile" without a folder, continue the add flow now.
+        if (pendingProfilePrompt != null) {
+          showAddProfileDialog = true
+        }
+      }
+    }
+  }
+
+  Box {
+    ChatView(
     task = task,
     viewModel = viewModel,
     modelManagerViewModel = modelManagerViewModel,
@@ -406,7 +473,104 @@ fun ChatViewWrapper(
     allowEditingSystemPrompt = allowEditingSystemPrompt,
     curSystemPrompt = curSystemPrompt,
     onSystemPromptChanged = onSystemPromptChanged,
+    activeProfileName = activeProfile,
+    profileTexts = profileTexts,
+    folderName = folderName,
+    onChangeFolderClicked = { folderPickerLauncher.launch(null) },
+    onAddProfileClicked = { prompt ->
+      pendingProfilePrompt = prompt
+      Log.d(
+        "ProfileAdd",
+        "Add-profile tapped: folderUri=${profileRepo?.getFolderUri()}, repo=${profileRepo != null}, promptLen=${prompt.length}",
+      )
+      if (profileRepo?.getFolderUri() == null) {
+        Log.d("ProfileAdd", "→ no folder set: launching folder picker")
+        folderPickerLauncher.launch(null) // pick a folder first, then the name dialog opens
+      } else {
+        Log.d("ProfileAdd", "→ folder set: opening name dialog")
+        showAddProfileDialog = true
+      }
+    },
     sendMessageTrigger = sendMessageTrigger,
     showAudioPicker = showAudioPicker,
-  )
+    )
+
+    // v1.1.3: add-profile name mini-dialog (screen-owned; the config dialog can't host it).
+    if (showAddProfileDialog) {
+      AlertDialog(
+        onDismissRequest = { showAddProfileDialog = false },
+        title = { Text(stringResource(R.string.config_add_profile)) },
+        text = {
+          Column {
+            Text(
+              stringResource(R.string.config_profile_name_prompt),
+              style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+              value = newProfileName,
+              onValueChange = { newProfileName = it },
+              label = { Text(stringResource(R.string.config_profile_name)) },
+            )
+          }
+        },
+        confirmButton = {
+          TextButton(
+            enabled = newProfileName.isNotBlank(),
+            onClick = {
+              val name = newProfileName.trim()
+              val prompt = pendingProfilePrompt ?: ""
+              Log.d(
+                "ProfileAdd",
+                "OK tapped: name='$name', promptLen=${prompt.length}, repo=${profileRepo != null}",
+              )
+              if (name.isEmpty() || profileRepo == null) {
+                Log.w(
+                  "ProfileAdd",
+                  "GUARD RETURN: nameEmpty=${name.isEmpty()} repoNull=${profileRepo == null}",
+                )
+                return@TextButton
+              }
+              scope.launch {
+                val ok = withContext(Dispatchers.IO) { profileRepo.addProfile(name, prompt) }
+                if (ok) {
+                  showAddProfileDialog = false
+                  withContext(Dispatchers.IO) {
+                    profileTexts = profileRepo.listProfiles().associate { it.name to it.prompt }
+                  }
+                  viewModel.setActiveProfile(name)
+                }
+              }
+            },
+          ) {
+            Text(stringResource(R.string.ok))
+          }
+        },
+        dismissButton = {
+          TextButton(onClick = { showAddProfileDialog = false }) {
+            Text(stringResource(R.string.cancel))
+          }
+        },
+      )
+    }
+  }
+}
+
+/** The display name of a SAF tree URI (e.g. "Download"), or null on failure. */
+private fun profileFolderDisplayName(context: android.content.Context, uriString: String): String? {
+  return try {
+    context.contentResolver
+      .query(
+        Uri.parse(uriString),
+        arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+        null,
+        null,
+        null,
+      )
+      ?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+      }
+  } catch (e: Exception) {
+    Log.w(TAG, "Failed to resolve profile folder name: ${e.message}")
+    null
+  }
 }

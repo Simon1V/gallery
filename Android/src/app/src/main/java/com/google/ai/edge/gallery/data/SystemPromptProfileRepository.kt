@@ -16,13 +16,12 @@
 
 package com.google.ai.edge.gallery.data
 
-import android.content.ContentValues
-import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
-import androidx.documentfile.provider.DocumentFile
 import com.google.ai.edge.gallery.data.SystemPromptProfile
 import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,9 +31,13 @@ import javax.inject.Singleton
  * Non-default profiles are JSON files in a user-chosen folder (SAF tree URI, global across
  * tasks); the default profile is bundled with the app (`assets/profiles/default.json`).
  *
- * All file I/O goes through [DocumentFile] (SAF). The folder URI is persisted via the
- * [DataStoreRepository] secrets map and must be re-acquired with
- * [reacquireFolderPermission] on process restart (SAF grants don't survive process death).
+ * API-37 note: the platform storage provider no longer supports the androidx.documentfile
+ * tree-query pattern (`DocumentFile.fromTreeUri().listFiles()` / `findFile()`), so ALL
+ * child-document I/O goes through `DocumentsContract` URIs + direct [ContentResolver]
+ * streams (single-document operations, which the provider does support). Created profile
+ * names are tracked in the DataStore, so the folder can be listed without any tree query —
+ * this makes profile read-back survive process restarts (the tree query only sees
+ * in-memory, current-process children).
  */
 @Singleton
 open class SystemPromptProfileRepository
@@ -98,28 +101,74 @@ constructor(
     }
   }
 
-  // ---------------------------------------------------------------- profile I/O (SAF)
+  // ---------------------------------------------------------------- profile names (DataStore)
 
-  private fun folderDocumentFile(): DocumentFile? {
-    val uriString = getFolderUri() ?: return null
-    val uri = Uri.parse(uriString)
-    return DocumentFile.fromTreeUri(context, uri)?.takeIf { it.canRead() }
+  private fun profileNamesKey() = "system_profile_names"
+
+  private fun profileNamesRaw(): String? = dataStoreRepository.readSecret(profileNamesKey())
+
+  /** The names of all profiles created through the app (tracked in the DataStore). */
+  private fun getProfileNames(): List<String> {
+    val raw = profileNamesRaw() ?: return emptyList()
+    return try {
+      val array = org.json.JSONArray(raw)
+      (0 until array.length()).map { array.getString(it) }
+    } catch (e: Exception) {
+      Log.w(TAG, "Corrupt profile-names list, ignoring: ${e.message}")
+      emptyList()
+    }
   }
 
+  private fun addProfileName(name: String) {
+    val names = getProfileNames().toMutableList()
+    if (name !in names) names.add(name)
+    dataStoreRepository.saveSecret(
+      profileNamesKey(),
+      org.json.JSONArray(names).toString(),
+    )
+  }
+
+  // ---------------------------------------------------------------- profile I/O (API-37 safe)
+
+  private fun folderTreeUri(): Uri? = getFolderUri()?.let { Uri.parse(it) }
+
   /**
-   * Lists all parseable profiles in the configured folder, sorted by name.
+   * Resolves the child-document URI for a profile name. Prefers the provider's canonical URI
+   * (persisted at creation time — the provider knows its own id scheme); falls back to
+   * reconstructing the 2026 pattern (`/` separator, percent-encoded) for profiles created by
+   * older builds. NOTE: `DocumentsContract.buildDocumentUriUsingTree` uses the classic `:`
+   * separator, which this world's provider does not understand — never use it for children.
+   */
+  private fun childUriFor(name: String): Uri? {
+    val tree = folderTreeUri() ?: return null
+    val childBase = name.trim().replace(" ", "_").replace(Regex("[^A-Za-z0-9_-]"), "_")
+    val saved = dataStoreRepository.readSecret("system_profile_uri_$childBase")
+    if (saved != null) return Uri.parse(saved)
+    // Reconstruct the 2026 pattern for profiles created by older builds: the full child id
+    // (`treeId/childId`) must be ONE percent-encoded path segment — a raw '/' would split
+    // the URI into extra segments and the provider would not resolve the document.
+    val treeId = tree.lastPathSegment ?: return null
+    val treeEnc = encodeDocId(treeId)
+    val fullChildId = encodeDocId("$treeId/${childBase}.json")
+    return Uri.parse("content://${tree.authority}/tree/$treeEnc/document/$fullChildId")
+  }
+
+  /** Percent-encodes the characters the 2026 provider uses inside document ids. */
+  private fun encodeDocId(id: String): String = id.replace(":", "%3A").replace("/", "%2F")
+
+  /**
+   * Lists all readable profiles in the configured folder, sorted by name.
    *
-   * @return Empty list when no folder is set, the URI is revoked, or the folder is empty;
-   *   unparseable `.json` files are skipped with a log (never fatal).
+   * @return Empty list when no folder is set, the URI is revoked (stale folder), or the
+   *   folder is empty; unreadable files are skipped (never fatal).
    */
   open fun listProfiles(): List<SystemPromptProfile> {
-    val root = folderDocumentFile() ?: return emptyList()
+    if (folderTreeUri() == null) return emptyList()
     val profiles = mutableListOf<SystemPromptProfile>()
-    root.listFiles().asSequence().forEach { file ->
-      val fileName = file.name ?: return@forEach
-      if (!file.isFile || !fileName.endsWith(".json")) return@forEach
-      val content = readFileContent(file) ?: return@forEach
-      val profile = SystemPromptProfile.parse(content) ?: return@forEach
+    for (name in getProfileNames()) {
+      val uri = childUriFor(name) ?: continue
+      val content = readDocumentText(uri) ?: continue
+      val profile = SystemPromptProfile.parse(content) ?: continue
       profiles.add(profile)
     }
     return profiles.sortedBy { it.name.lowercase() }
@@ -131,9 +180,8 @@ constructor(
    * fall back to the task default).
    */
   open fun readProfilePrompt(name: String): String? {
-    val root = folderDocumentFile() ?: return null
-    val file = findChildByName(root, sanitizeProfileFileName(name)) ?: return null
-    val content = readFileContent(file) ?: return null
+    val uri = childUriFor(name) ?: return null
+    val content = readDocumentText(uri) ?: return null
     return SystemPromptProfile.parse(content)?.prompt
   }
 
@@ -141,53 +189,68 @@ constructor(
    * Overwrites the prompt of an existing profile file (write-back semantics: field edits go
    * back into the file).
    *
-   * @return true if the file was found and written.
+   * @return true if the file was written.
    */
   open fun updateProfilePrompt(name: String, prompt: String): Boolean {
-    val root = folderDocumentFile() ?: return false
-    val file = findChildByName(root, sanitizeProfileFileName(name)) ?: return false
-    return writeProfileFile(file, name, prompt)
+    val uri = childUriFor(name) ?: return false
+    return writeDocumentText(uri, name, prompt)
   }
 
   /**
-   * Creates a new profile file in the folder and returns its name.
+   * Creates a new profile file in the folder via `DocumentsContract.createDocument` (the
+   * platform's METHOD_CREATE_DOCUMENT IPC — the 2026-correct child-creation path;
+   * `ContentResolver.insert()` on SAF trees is unsupported) and writes its JSON content
+   * through a direct document stream.
    *
-   * @return true if the file was created (name was valid and unique); false otherwise.
+   * @return true if the file was created (name was valid and unique) and written.
    */
   open fun addProfile(name: String, prompt: String): Boolean {
-    val root = folderDocumentFile() ?: return false
+    Log.d(
+      TAG,
+      "addProfile: name='$name', promptLen=${prompt.length}, folderUri=${getFolderUri()}",
+    )
+    val tree = folderTreeUri()
+    if (tree == null) {
+      Log.w(TAG, "addProfile: no folder set")
+      return false
+    }
     val trimmed = name.trim()
     if (trimmed.isEmpty()) {
       Log.w(TAG, "addProfile: blank name")
       return false
     }
-    val fileName = sanitizeProfileFileName(trimmed)
-    if (findChildByName(root, fileName) != null) {
+    val childId = "${trimmed.replace(" ", "_").replace(Regex("[^A-Za-z0-9_-]"), "_")}.json"
+    val dupUri = childUriFor(trimmed)
+    if (
+      trimmed in getProfileNames() ||
+        (dupUri != null && readDocumentText(dupUri) != null)
+    ) {
       Log.w(TAG, "addProfile: duplicate name '$trimmed'")
       return false
     }
-    // Create the child document via ContentResolver.insert (SAF trees have no
-    // DocumentFile.createDocument in androidx 1.0.x/1.1.0).
-    val treeUri = Uri.parse(getFolderUri()!!)
-    val childId = "${trimmed.replace(" ", "_").replace(Regex("[^A-Za-z0-9_-]"), "_")}.json"
-    val documentId = "${treeUri.lastPathSegment}%3A$childId"
-    val fileUri =
-      Uri.withAppendedPath(
-        Uri.Builder()
-          .scheme("content")
-          .authority(treeUri.authority)
-          .path("document/")
-          .build(),
-        documentId,
-      )
-    val createdUri = try {
-      context.contentResolver.insert(fileUri, ContentValues().apply { put("mimeType", "text/json") })
-    } catch (e: Exception) {
-      Log.e(TAG, "addProfile: insert failed: ${e.message}")
+    val parentDocumentUri =
+      DocumentsContract.buildDocumentUriUsingTree(tree, tree.lastPathSegment)
+    val createdUri =
+      try {
+        DocumentsContract.createDocument(context.contentResolver, parentDocumentUri, "text/json", childId)
+      } catch (e: Exception) {
+        Log.e(TAG, "addProfile: createDocument threw ${e.javaClass.simpleName}: ${e.message}")
+        return false
+      }
+    if (createdUri == null) {
+      Log.w(TAG, "addProfile: createDocument returned NULL (provider rejected it)")
       return false
-    } ?: return false
-    val file = DocumentFile.fromSingleUri(context, createdUri) ?: return false
-    return writeProfileFile(file, trimmed, prompt)
+    }
+    Log.i(TAG, "addProfile: created document uri=$createdUri")
+    val written = writeDocumentText(createdUri, trimmed, prompt)
+    if (written) {
+      addProfileName(trimmed)
+      // Persist the provider's canonical URI so later builds/sessions can address the file
+      // without guessing its id scheme.
+      val childBase = trimmed.replace(" ", "_").replace(Regex("[^A-Za-z0-9_-]"), "_")
+      dataStoreRepository.saveSecret("system_profile_uri_$childBase", createdUri.toString())
+    }
+    return written
   }
 
   /**
@@ -208,39 +271,37 @@ constructor(
 
   // ---------------------------------------------------------------- helpers
 
-  private fun readFileContent(file: DocumentFile): String? {
+  /** Reads a document's text via a direct [ContentResolver] stream; null on any failure. */
+  private fun readDocumentText(uri: Uri): String? {
     return try {
-      val stream = context.contentResolver.openInputStream(file.uri) ?: return null
+      val stream = context.contentResolver.openInputStream(uri)
+      if (stream == null) {
+        Log.w(TAG, "openInputStream returned NULL for $uri (missing document or no permission)")
+        return null
+      }
       stream.bufferedReader().use { it.readText() }
     } catch (e: Exception) {
-      Log.w(TAG, "Failed to read ${file.uri}: ${e.message}")
+      Log.w(TAG, "Failed to read $uri: ${e.javaClass.simpleName}: ${e.message}")
       null
     }
   }
 
-  private fun writeProfileFile(
-    file: DocumentFile,
-    name: String,
-    prompt: String,
-  ): Boolean {
+  /** Overwrites a document's content (`"w"` mode) with the profile's JSON. */
+  private fun writeDocumentText(uri: Uri, name: String, prompt: String): Boolean {
     return try {
-      val stream = context.contentResolver.openOutputStream(file.uri) ?: return false
+      val stream = context.contentResolver.openOutputStream(uri, "w")
+      if (stream == null) {
+        Log.w(TAG, "openOutputStream returned NULL for $uri (missing document or no permission)")
+        return false
+      }
       stream.use { it.write(SystemPromptProfile.serialize(name, prompt).toByteArray()) }
-      Log.i(TAG, "Wrote profile '$name'")
+      Log.i(TAG, "Wrote profile '$name' to $uri")
       true
     } catch (e: Exception) {
-      Log.e(TAG, "Failed to write profile '$name': ${e.message}")
+      Log.e(TAG, "Failed to write profile '$name' to $uri: ${e.javaClass.simpleName}: ${e.message}")
       false
     }
   }
-
-  /** Finds a direct child of [root] whose file name matches [fileName], or null. */
-  private fun findChildByName(root: DocumentFile, fileName: String): DocumentFile? =
-    root.listFiles().firstOrNull { it.name == fileName }
-
-  /** Sanitizes a profile name into a safe file name (prevents path traversal / dupes). */
-  private fun sanitizeProfileFileName(name: String): String =
-    name.trim().replace(Regex("[^A-Za-z0-9 _-]"), "_").replace(" ", "_") + ".json"
 
   private companion object {
     const val TAG = "SystemPromptProfileRepo"

@@ -65,12 +65,14 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -145,13 +147,18 @@ fun ConfigDialog(
   configs: List<Config>,
   initialValues: Map<String, Any>,
   onDismissed: () -> Unit,
-  onOk: (values: Map<String, Any>, oldSystemPrompt: String, newSystemPrompt: String) -> Unit,
+  onOk: (values: Map<String, Any>, oldSystemPrompt: String, newSystemPrompt: String, selectedProfile: String?) -> Unit,
   okBtnLabel: String = stringResource(R.string.ok),
   subtitle: String = "",
   showCancel: Boolean = true,
   showSystemPromptEditorTab: Boolean = false,
   defaultSystemPrompt: String = "",
   curSystemPrompt: String = "",
+  activeProfileName: String? = null,
+  profileTexts: Map<String, String> = emptyMap(),
+  folderName: String? = null,
+  onChangeFolderClicked: () -> Unit = {},
+  onAddProfileClicked: (String) -> Unit = { _ -> },
 ) {
   val values: SnapshotStateMap<String, Any> = remember {
     mutableStateMapOf<String, Any>().apply {
@@ -162,6 +169,16 @@ fun ConfigDialog(
   var selectedTabIndex by remember { mutableIntStateOf(0) }
   val savedSystemPrompt = remember { curSystemPrompt }
   var systemPrompt by remember { mutableStateOf(curSystemPrompt) }
+  // v1.1.3: active system-prompt profile (null = free-text mode). Re-synced whenever the
+  // screen passes a new one (e.g. after "Add profile" writes a new file).
+  var selectedProfile by remember { mutableStateOf<String?>(activeProfileName) }
+  var showProfilePicker by remember { mutableStateOf(false) }
+  LaunchedEffect(activeProfileName) {
+    if (activeProfileName != null) {
+      selectedProfile = activeProfileName
+      profileTexts[activeProfileName]?.let { systemPrompt = it }
+    }
+  }
 
   val modelConfigsTabTitle = stringResource(R.string.config_dialog_tab_model_configs)
   val systemPromptTabTitle = stringResource(R.string.config_dialog_tab_system_prompt)
@@ -240,37 +257,135 @@ fun ConfigDialog(
               ConfigEditorsPanel(configs = configs, values = values)
             }
           }
-          ConfigTab.SYSTEM_PROMPT ->
-            OutlinedTextField(
-              value = systemPrompt,
-              modifier = Modifier.weight(1f, fill = false),
-              textStyle = MaterialTheme.typography.bodySmall,
-              onValueChange = { systemPrompt = it },
-              placeholder = {
-                Text(
-                  text = stringResource(R.string.system_prompt_placeholder),
-                  modifier =
-                    Modifier.offset(y = (4).dp), // Adjust to align the cursor with the text.
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                )
-              },
-            )
-        }
-
-        // Button row(s).
-        if (selectedTab == ConfigTab.SYSTEM_PROMPT) {
-          Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            // Restore default button to restore system prompt.
-            OutlinedButton(
-              onClick = { systemPrompt = defaultSystemPrompt },
-              contentPadding = SMALL_BUTTON_CONTENT_PADDING,
+          ConfigTab.SYSTEM_PROMPT -> {
+            val scrollState = rememberScrollState()
+            val scrollbarColor = MaterialTheme.colorScheme.onSurfaceVariant
+            // v1.1.3: reworked, bigger tab - profile selector, prompt field, buttons, folder row.
+            Column(
+              modifier =
+                Modifier.heightIn(max = 420.dp)
+                  .verticalScrollbar(scrollState = scrollState, color = scrollbarColor)
+                  .verticalScroll(scrollState),
+              verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-              Text(stringResource(R.string.restore_default))
+              // 1. Profile selector (Default + profiles from the configured folder).
+              Text(
+                stringResource(R.string.config_profile_label),
+                style = MaterialTheme.typography.labelMedium,
+              )
+              OutlinedButton(onClick = { showProfilePicker = true }) {
+                Text(
+                  when (selectedProfile) {
+                    "default" -> stringResource(R.string.config_profile_default)
+                    "free text" -> stringResource(R.string.config_profile_free_text)
+                    else -> selectedProfile ?: stringResource(R.string.config_profile_free_text)
+                  },
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+              }
+              // 2. System prompt field.
+              OutlinedTextField(
+                value = systemPrompt,
+                modifier = Modifier.heightIn(min = 120.dp),
+                textStyle = MaterialTheme.typography.bodySmall,
+                onValueChange = { systemPrompt = it },
+                placeholder = {
+                  Text(
+                    text = stringResource(R.string.system_prompt_placeholder),
+                    modifier =
+                      Modifier.offset(y = (4).dp), // Adjust to align the cursor with the text.
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                  )
+                },
+              )
+              // 3. Action buttons: restore default + add profile.
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+              ) {
+                OutlinedButton(
+                  onClick = {
+                    systemPrompt = defaultSystemPrompt
+                    selectedProfile = "default"
+                  },
+                  contentPadding = SMALL_BUTTON_CONTENT_PADDING,
+                ) {
+                  Text(stringResource(R.string.restore_default))
+                }
+                OutlinedButton(
+                  onClick = { onAddProfileClicked(systemPrompt) },
+                  contentPadding = SMALL_BUTTON_CONTENT_PADDING,
+                ) {
+                  Text(stringResource(R.string.config_profile_add))
+                }
+              }
+              // 4. Profile folder location.
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    stringResource(R.string.config_profile_folder),
+                    style = MaterialTheme.typography.labelMedium,
+                  )
+                  Text(
+                    (folderName ?: stringResource(R.string.config_profile_folder_not_set)),
+                    style = MaterialTheme.typography.bodySmall,
+                  )
+                }
+                TextButton(onClick = onChangeFolderClicked) {
+                  Text(stringResource(R.string.config_change))
+                }
+              }
+            }
+            // 5. Profile picker: a Dialog with clickable rows (the read-only field consumed
+            //    taps, so the selector is a button that opens this list - same pattern as
+            //    the original app's model picker).
+            if (showProfilePicker) {
+              Dialog(onDismissRequest = { showProfilePicker = false }) {
+                // Explicit background: the foundation Dialog window is transparent, so the
+                // content must draw its own surface (same pattern as the app's other dialogs).
+                Surface(shape = RoundedCornerShape(16.dp)) {
+                  Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                      stringResource(R.string.config_profile_label),
+                      style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ProfilePickerRow(
+                      name = null,
+                      label = stringResource(R.string.config_profile_default),
+                      selected = selectedProfile == "default",
+                    ) {
+                      selectedProfile = "default"
+                      showProfilePicker = false
+                      systemPrompt = defaultSystemPrompt
+                    }
+                    ProfilePickerRow(
+                      name = "free text",
+                      label = stringResource(R.string.config_profile_free_text),
+                      selected = selectedProfile == null,
+                    ) {
+                      selectedProfile = null
+                      showProfilePicker = false
+                    }
+                    for ((name, _) in profileTexts) {
+                      ProfilePickerRow(
+                        name = name,
+                        label = name,
+                        selected = selectedProfile == name,
+                      ) {
+                        selectedProfile = name
+                        showProfilePicker = false
+                        profileTexts[name]?.let { systemPrompt = it }
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -291,7 +406,7 @@ fun ConfigDialog(
           Button(
             onClick = {
               Log.d(TAG, "Values from dialog: $values")
-              onOk(values.toMap(), savedSystemPrompt, systemPrompt)
+              onOk(values.toMap(), savedSystemPrompt, systemPrompt, selectedProfile)
             }
           ) {
             Text(okBtnLabel)
@@ -828,5 +943,28 @@ internal fun ConfigTab(title: String, selected: Boolean, onClick: () -> Unit) {
           vertical = TAB_LABEL_VERTICAL_PADDING,
         ),
     )
+  }
+}
+
+/**
+ * One selectable row in the profile picker dialog. [name] is the profile key (null =
+ * default, "free text" = free-text mode, otherwise the profile's name); [selected] marks
+ * the current selection with a check icon.
+ */
+@Composable
+private fun ProfilePickerRow(
+  name: String?,
+  label: String,
+  selected: Boolean,
+  onClick: () -> Unit,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    if (selected) {
+      Icon(Icons.Rounded.CheckCircle, contentDescription = null)
+    }
+    Text(label, modifier = Modifier.weight(1f))
   }
 }

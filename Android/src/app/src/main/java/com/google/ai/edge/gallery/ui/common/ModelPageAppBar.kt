@@ -88,7 +88,12 @@ fun ModelPageAppBar(
   allowEditingSystemPrompt: Boolean = false,
   curSystemPrompt: String = "",
   defaultSystemPrompt: String = task.defaultSystemPrompt,
-  onSystemPromptChanged: (String) -> Unit = {},
+  onSystemPromptChanged: (String, String?) -> Unit = { _, _ -> },
+  activeProfileName: String? = null,
+  profileTexts: Map<String, String> = emptyMap(),
+  folderName: String? = null,
+  onChangeFolderClicked: () -> Unit = {},
+  onAddProfileClicked: (String) -> Unit = { _ -> },
   shouldShowHistoryButton: Boolean = false,
   onHistoryClicked: (Model) -> Unit = {},
   isAutoCompactEnabled: Boolean = false,
@@ -280,7 +285,7 @@ fun ModelPageAppBar(
       configs = modelConfigs,
       initialValues = dialogInitialValues,
       onDismissed = { showConfigDialog = false },
-      onOk = { curConfigValues, oldSystemPrompt, newSystemPrompt ->
+      onOk = { curConfigValues, oldSystemPrompt, newSystemPrompt, selectedProfile ->
         // Hide config dialog.
         showConfigDialog = false
 
@@ -330,7 +335,7 @@ fun ModelPageAppBar(
 
         if (same) {
           if (systemPromptChanged) {
-            onSystemPromptChanged(newSystemPrompt)
+            onSystemPromptChanged(newSystemPrompt, selectedProfile)
           }
           return@ConfigDialog
         }
@@ -361,7 +366,7 @@ fun ModelPageAppBar(
               force = true,
               onDone = {
                 if (oldSystemPrompt != newSystemPrompt) {
-                  onSystemPromptChanged(newSystemPrompt)
+                  onSystemPromptChanged(newSystemPrompt, selectedProfile)
                 }
               },
             )
@@ -374,6 +379,11 @@ fun ModelPageAppBar(
       showSystemPromptEditorTab = allowEditingSystemPrompt && !model.isAiCore,
       defaultSystemPrompt = defaultSystemPrompt,
       curSystemPrompt = curSystemPrompt,
+      activeProfileName = activeProfileName,
+      profileTexts = profileTexts,
+      folderName = folderName,
+      onChangeFolderClicked = onChangeFolderClicked,
+      onAddProfileClicked = onAddProfileClicked,
     )
   }
 }

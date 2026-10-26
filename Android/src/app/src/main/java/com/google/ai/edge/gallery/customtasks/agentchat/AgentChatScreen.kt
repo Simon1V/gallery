@@ -477,13 +477,14 @@ fun AgentChatScreen(
     },
     allowEditingSystemPrompt = true,
     curSystemPrompt = curSystemPrompt,
-    onSystemPromptChanged = { newPrompt ->
+    onSystemPromptChanged = { newPrompt, selectedProfile ->
       curSystemPrompt = newPrompt
       viewModel.applySystemPromptChange(
         task = task,
         model = modelManagerViewModel.uiState.value.selectedModel,
         newPrompt = newPrompt,
         systemPromptUpdatedMessage = systemPromptUpdatedMessage,
+        selectedProfile = selectedProfile,
       )
     },
     emptyStateComposable = { model ->

@@ -88,6 +88,16 @@ open class LlmChatViewModelBase(
 ) : ChatViewModel(runtimeExecutor, llmSessionManager, dataStoreRepository) {
   private val _uiSystemPrompt = MutableStateFlow("")
   val uiSystemPrompt: StateFlow<String> = _uiSystemPrompt.asStateFlow()
+  // v1.1.3: active system-prompt profile (null = free-text mode).
+  private val _activeProfile = MutableStateFlow<String?>(null)
+  val activeProfile: StateFlow<String?> = _activeProfile.asStateFlow()
+
+  // v1.1.3: increments on every config-dialog OK, so the screen can re-read the profile
+  // list + folder name and all UI reloads to reflect the just-persisted state.
+  private val _configOkCount = MutableStateFlow(0)
+  val configOkCount: StateFlow<Int> = _configOkCount.asStateFlow()
+  /** The injected profile repository (null when unavailable) — used by screens for SAF ops. */
+  val profileRepository: SystemPromptProfileRepository? get() = systemPromptProfileRepository
   private val _liveMetrics = MutableStateFlow<InferenceMetrics?>(null)
   override val liveMetrics: StateFlow<InferenceMetrics?> = _liveMetrics.asStateFlow()
   private var liveMetricsJob: Job? = null
@@ -155,6 +165,7 @@ open class LlmChatViewModelBase(
           task,
         )
       _uiSystemPrompt.value = effectivePrompt
+      _activeProfile.value = systemPromptProfileRepository?.getActiveProfile(task.id)
     }
   }
 
@@ -175,10 +186,47 @@ open class LlmChatViewModelBase(
     model: Model,
     newPrompt: String,
     systemPromptUpdatedMessage: String,
+    selectedProfile: String? = null,
   ) {
+    val oldPrompt = _uiSystemPrompt.value
+    val edited = newPrompt != oldPrompt
     _uiSystemPrompt.value = newPrompt
     viewModelScope.launch {
-      systemPromptRepository?.updateSystemPrompt(task.id, newPrompt)
+      when {
+        selectedProfile == null -> {
+          // Free-text mode: v1.1.0 DataStore custom-prompt behavior.
+          systemPromptRepository?.updateSystemPrompt(task.id, newPrompt)
+          systemPromptProfileRepository?.setActiveProfile(task.id, null)
+          _activeProfile.value = null
+        }
+        selectedProfile == "default" -> {
+          if (edited) {
+            // Default + edited: DataStore override (assets are read-only); free-text chain wins.
+            systemPromptRepository?.updateSystemPrompt(task.id, newPrompt)
+            systemPromptProfileRepository?.setActiveProfile(task.id, null)
+            _activeProfile.value = null
+          } else {
+            systemPromptProfileRepository?.setActiveProfile(task.id, "default")
+            _activeProfile.value = "default"
+          }
+        }
+        else -> {
+          // File profile: OK ALWAYS writes the field text back into the profile file
+          // (write-back semantics, unconditional); the result is logged so a failed write
+          // is never silent.
+          val result = systemPromptProfileRepository?.updateProfilePrompt(selectedProfile, newPrompt)
+          Log.d(
+            TAG,
+            "applySystemPromptChange: file profile '$selectedProfile' write-back result=$result, promptLen=${newPrompt.length}",
+          )
+          if (result == false) {
+            Log.w(TAG, "write-back FAILED for file profile '$selectedProfile' (folder/URI/permission?)")
+          }
+          systemPromptProfileRepository?.setActiveProfile(task.id, selectedProfile)
+          _activeProfile.value = selectedProfile
+        }
+      }
+      _configOkCount.value = _configOkCount.value + 1
       resetSession(
         task = task,
         model = model,
@@ -188,6 +236,15 @@ open class LlmChatViewModelBase(
         onDone = { addMessage(model, ChatMessageInfo(content = systemPromptUpdatedMessage)) },
       )
     }
+  }
+
+  /**
+   * v1.1.3: sets the active profile for the current task (used by the add-profile flow).
+   */
+  fun setActiveProfile(name: String?) {
+    val taskId = currentTaskId ?: return
+    systemPromptProfileRepository?.setActiveProfile(taskId, name)
+    _activeProfile.value = name
   }
 
   open fun generateResponse(

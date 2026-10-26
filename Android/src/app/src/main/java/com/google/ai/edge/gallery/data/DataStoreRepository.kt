@@ -28,6 +28,7 @@ import com.google.ai.edge.gallery.proto.Skill
 import com.google.ai.edge.gallery.proto.Skills
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.proto.UserData
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
@@ -216,7 +217,18 @@ class DefaultDataStoreRepository(
   }
 
   override fun readSecret(key: String): String? {
-    return runBlocking { userDataDataStore.data.first().secretsMap[key] }
+    return runBlocking {
+      val first = userDataDataStore.data.first().secretsMap[key]
+      if (first != null) {
+        first
+      } else {
+        // v1.1.3: Proto-DataStore loads the on-disk file asynchronously, so at cold start
+        // the first `data` emission is the default (empty) state. Re-read once after the
+        // file load settles so startup reads see persisted values (e.g. folder URI, prompts).
+        delay(500)
+        userDataDataStore.data.first().secretsMap[key]
+      }
+    }
   }
 
   override fun deleteSecret(key: String) {
