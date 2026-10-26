@@ -1329,6 +1329,9 @@
   <string name="live_metrics_speed_decode_annotation" translatable="true" description="Small annotation label shown next to the primary token per second value in the Speed column of the live inference metrics banner to clarify that the primary rate is token decode speed. [CHAR_LIMIT=12]">decode</string>
   <!-- Label for live metrics tokens. -->
   <string name="live_metrics_tokens" translatable="true" description="Column header label in the live inference metrics banner above the chat input box indicating prompt and generated token counts; Tokens is a plural noun. [CHAR_LIMIT=15]">Tokens</string>
+  <!-- Fork v1.1.2: replaces the redundant Tokens column; the session-accumulated token count
+       is shown in the Context row instead. -->
+  <string name="live_metrics_prompt_speed" translatable="true" description="Fork: column header label in the live inference metrics banner indicating prompt (prefill) processing speed in tokens per second; Prompt speed is a noun phrase. [CHAR_LIMIT=15]">Prompt speed</string>
   <!-- Label for live metrics memory. -->
   <string name="live_metrics_ram" translatable="true" description="Column header label in the live inference metrics banner above the chat input box indicating resident system memory usage; RAM is an acronym for Random Access Memory. [CHAR_LIMIT=15]">RAM</string>
   <!-- Label for live metrics context window. -->

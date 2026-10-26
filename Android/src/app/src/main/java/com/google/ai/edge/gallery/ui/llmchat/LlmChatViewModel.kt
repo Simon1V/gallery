@@ -214,7 +214,18 @@ open class LlmChatViewModelBase(
       val enableThinking =
         allowThinking &&
           model.getBooleanConfigValue(key = ConfigKeys.ENABLE_THINKING, defaultValue = false)
-      val extraContext = if (enableThinking) mapOf("enable_thinking" to "true") else emptyMap()
+      val extraContext =
+        buildMap {
+          if (enableThinking) put("enable_thinking", "true")
+          // Fork: app-side estimate of the session's accumulated token count (chat-history
+          // chars / ~4 chars/token), consumed by the metrics tracker for lazily-prefilled
+          // (restored) conversations whose engine telemetry reports 0.
+          val historyEstimate =
+            (uiState.value.messagesByModel[model.name] ?: emptyList())
+              .filterIsInstance<ChatMessageText>()
+              .sumOf { it.content.length } / 4
+          if (historyEstimate > 0) put("session_token_estimate", historyEstimate.toString())
+        }
       val metadata =
         buildMap<String, Any> {
           put(AgentRequest.SESSION_ID, currentSessionId)

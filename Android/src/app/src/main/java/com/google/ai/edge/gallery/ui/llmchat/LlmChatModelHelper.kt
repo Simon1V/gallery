@@ -85,6 +85,10 @@ data class LlmModelInstance(
   val engine: Engine,
   var conversation: Conversation,
   val metricsTracker: MetricsTracker? = null,
+  // Fork: app-side estimate of the session's accumulated token count (chat-history chars /
+  // ~4 chars/token), set by the ViewModel via extraContext; consumed by the metrics tracker
+  // for lazily-prefilled (restored) conversations whose engine telemetry reports 0.
+  var sessionTokenEstimate: Int? = null,
 ) : LlmConversationInstance {
   val activeEphemeralConversations: MutableSet<Conversation> =
     Collections.synchronizedSet(mutableSetOf())
@@ -478,7 +482,11 @@ object LlmChatModelHelper : LlmModelHelper {
     // Step 1: Start the turn before processing the input, so its latency includes the input
     // processing the user waits for.
     if (!isEphemeral) {
-      instance.metricsTracker?.startTurn(conversation.asSession())
+      // Fork: carry the ViewModel's history token estimate into the turn so the metrics
+      // tracker can show session-accumulated tokens for restored conversations.
+      extraContext["session_token_estimate"]?.toIntOrNull()
+        ?.let { instance.sessionTokenEstimate = it }
+      instance.metricsTracker?.startTurn(conversation.asSession(instance.sessionTokenEstimate))
     }
     try {
       // Step 2: Assemble multimodal prompt attachments (images, audio clips, and text).

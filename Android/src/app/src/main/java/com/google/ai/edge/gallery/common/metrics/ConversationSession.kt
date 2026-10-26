@@ -49,16 +49,46 @@ interface ConversationSession {
 
   /** Returns runtime benchmark metrics from the inference engine, if supported. */
   fun getBenchmark(): InferenceBenchmark?
+
+  /**
+   * Fork: app-side estimate of the session's accumulated token count (KV-cache history tokens).
+   *
+   * LiteRT-LM reports 0 for lazily-prefilled conversations (restored sessions, context
+   * compaction, post-stop recovery), so the engine's telemetry cannot express the session total.
+   * The estimate derives from the re-prefilled history text held by the engine. Returns `null`
+   * when the engine does not expose an estimate.
+   */
+  fun getEstimatedSessionTokens(): Int? = null
 }
 
 /** Wraps a LiteRT-LM [Conversation] into an engine-agnostic [ConversationSession]. */
-fun Conversation.asSession(): ConversationSession =
+fun Conversation.asSession(historyEstimate: Int? = null): ConversationSession =
   object : ConversationSession {
     override val isAlive: Boolean
       get() = this@asSession.isAlive
 
+    // Fork: actually query the engine's KV-cache token count (upstream hardcoded `null`,
+    // which made the Context row show `--` for every turn).
     override fun getTokenCount(): Int? =
-    null
+      try {
+        this@asSession.getTokenCount()
+      } catch (_: Throwable) {
+        null
+      }
+
+    // Fork: estimate the session's accumulated token count. The ViewModel's chat-history
+    // estimate (chars / ~4 chars/token) takes priority; the engine's rendered preface is the
+    // fallback. Used when the engine's telemetry reports 0 for lazily-prefilled (restored)
+    // conversations.
+    override fun getEstimatedSessionTokens(): Int? =
+      historyEstimate?.takeIf { it > 0 }
+        ?: try {
+            @OptIn(ExperimentalApi::class)
+            val preface = this@asSession.renderPrefaceIntoString()
+            (preface.length / 4).takeIf { it > 0 }
+          } catch (_: Throwable) {
+            null
+          }
 
     override fun getBenchmark(): InferenceBenchmark? =
       try {

@@ -74,8 +74,10 @@ internal data class LiveMetricsUiState(
   val speedValue: String,
   val speedAnnotation: String?,
   val speedSubtextLines: List<String>,
-  val tokensValue: String,
-  val tokensSubtext: String?,
+  // Fork v1.1.2: the redundant Tokens column is replaced by the prompt (prefill) processing
+  // speed; the session-accumulated token count lives in the Context row.
+  val prefillSpeedValue: String,
+  val prefillSpeedSubtext: String?,
   val ramValue: String,
   val ramSubtext: String?,
   val contextUsageText: String,
@@ -149,9 +151,9 @@ fun LiveMetricsBar(
           modifier = Modifier.weight(1f),
         )
         MetricColumn(
-          label = stringResource(R.string.live_metrics_tokens),
-          value = uiState.tokensValue,
-          subtextLines = listOfNotNull(uiState.tokensSubtext),
+          label = stringResource(R.string.live_metrics_prompt_speed),
+          value = uiState.prefillSpeedValue,
+          subtextLines = listOfNotNull(uiState.prefillSpeedSubtext),
           modifier = Modifier.weight(1f),
         )
         MetricColumn(
@@ -372,42 +374,23 @@ internal fun resolveLiveMetricsUiState(
       else -> emptyList()
     }
 
-  val hasPromptTokens = tokens.hasPromptTokens() && tokens.promptTokens > 0
-  val hasOutputTokens = tokens.hasOutputTokens() && tokens.outputTokens > 0
-  val hasTotalTokens = tokens.hasTotalTokens() && tokens.totalTokens > 0
-
-  val tokensValue =
+  // Fork: the redundant per-turn Tokens column is replaced by the prompt (prefill) processing
+  // speed; the session-accumulated token count is shown in the Context row below.
+  val prefillSpeedValue =
     when {
       statusCode == InferenceStatus.Code.IDLE || statusCode == InferenceStatus.Code.PREFILLING ->
-        stringResource(R.string.live_metrics_tokens_empty)
-      hasPromptTokens ->
-        stringResource(
-          R.string.live_metrics_tokens_io_format,
-          tokens.promptTokens,
-          if (hasOutputTokens) tokens.outputTokens else 0,
-        )
-      hasOutputTokens ->
-        stringResource(R.string.live_metrics_tokens_gen_format, tokens.outputTokens)
-      else -> stringResource(R.string.live_metrics_tokens_empty)
+        stringResource(R.string.live_metrics_speed_empty)
+      hasPrefillSpeed ->
+        stringResource(R.string.live_metrics_decode_speed_format, latency.prefillSpeedTps)
+      else -> stringResource(R.string.live_metrics_speed_empty)
     }
 
-  val tokensSubtext =
-    when (statusCode) {
-      InferenceStatus.Code.IDLE,
-      InferenceStatus.Code.PREFILLING -> null
-      InferenceStatus.Code.DECODING,
-      InferenceStatus.Code.SUCCESS,
-      InferenceStatus.Code.CANCELLED,
-      InferenceStatus.Code.ERROR,
-      InferenceStatus.Code.CODE_UNSPECIFIED,
-      InferenceStatus.Code.UNRECOGNIZED ->
-        when {
-          hasTotalTokens ->
-            stringResource(R.string.live_metrics_tokens_total_format, tokens.totalTokens)
-          hasOutputTokens ->
-            stringResource(R.string.live_metrics_tokens_total_format, tokens.outputTokens)
-          else -> null
-        }
+  val prefillSpeedSubtext =
+    when {
+      statusCode == InferenceStatus.Code.IDLE || statusCode == InferenceStatus.Code.PREFILLING ->
+        null
+      hasTtft -> stringResource(R.string.live_metrics_ttft_format, latency.ttftMs)
+      else -> null
     }
 
   val isTurnOrTerminal = inference.status.code != InferenceStatus.Code.IDLE || isCompactingContext
@@ -486,8 +469,8 @@ internal fun resolveLiveMetricsUiState(
     speedValue = speedValue,
     speedAnnotation = speedAnnotation,
     speedSubtextLines = speedSubtextLines,
-    tokensValue = tokensValue,
-    tokensSubtext = tokensSubtext,
+    prefillSpeedValue = prefillSpeedValue,
+    prefillSpeedSubtext = prefillSpeedSubtext,
     ramValue = ramValue,
     ramSubtext = ramSubtext,
     contextUsageText = contextUsageText,

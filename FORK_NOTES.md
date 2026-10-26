@@ -188,6 +188,60 @@ so the consumed count is unavailable and the bar shows `-- / <max>` (the empty-s
 format). The max, progress bar, and compaction-threshold marker still render. On
 conversations without `initialMessages` the numeric count is expected to appear.
 
+### F. Live-metrics post-turn fix + column redesign (v1.1.2, 2026-10-26)
+
+**Problem:** after a turn completed, the bar reset to `--` for speed/tokens and the
+context row showed `-- / <max>` (upstream-engine quirk, above: lazy-prefilled
+conversations report `getTokenCount() == 0` and no prefill/decode telemetry at turn end).
+
+**Fixes (all fork-only, engine untouched):**
+
+1. **Speed survives turn end** (`MetricsTracker.endTurnInternal` → `mergeTerminalLatencyGaps`):
+   when the engine's terminal `LatencyMetrics` is empty (lazy-prefill conversations), the
+   last live-measured `TTFT / prefill / decode` values from `liveMetrics` are merged into
+   the final `InferenceMetrics`. Engine-provided values always win; the live merge only
+   fills gaps. The bar therefore keeps showing the measured speed after completion.
+
+2. **Redundant `Tokens` column replaced by `Prompt speed`** (`LiveMetricsBar`):
+   the per-turn token count duplicated the Context row's session total, so the middle
+   column now shows prompt (prefill) processing speed instead. Value: engine
+   `prefillSpeedTps` when available; for lazily-prefilled conversations the tracker
+   estimates it app-side — re-prefilled history tokens ÷ TTFT seconds
+   (`appPrefillSpeed` in `LitertlmInferenceMetricsTracker`, live *and* final paths).
+   Subtext: TTFT in ms (the re-prefill duration). The session-accumulated token count
+   is shown in the Context row (`consumed / max`, %) — the single source of truth.
+
+3. **Session-accumulated consumed tokens** (context row shows the running total, not
+   per-turn):
+   - `ConversationSession.asSession(historyEstimate)`: the engine `getTokenCount()`
+     (preferred) or an app-side estimate — `historyEstimate` (app history, i.e. messages
+     the app re-prefills) or, when null, `renderPrefaceIntoString()`-based estimate
+     (only works for prefill-once conversations; returns null for lazy-prefill ones).
+   - `LlmChatModelHelper` carries `LlmModelInstance.sessionTokenEstimate`; the chat
+     `sendMessage` path reads `extraContext["session_token_estimate"]` (set by
+     `LlmChatViewModel` = Σ history message chars ÷ 4) and feeds it into `asSession`.
+   - `LitertlmInferenceMetricsTracker.queryTokenCount`: engine count (if > 0) →
+     `estimatedSessionTokens` → `prefillTokenCount + outputTokens` fallback.
+   - `TurnMetricsCalculator.consumedContextTokens`: engine `tokenCount` →
+     `estimatedSessionTokens` → `startContext + prompt + output`. The engine count is
+     the KV-cache size (session-accumulated), so the Context row tracks the session
+     total; the per-turn total is still logged in the turn log.
+
+**On-device verification (Pixel 8a, Gemma-4-E2B-it, 2026-10-26):**
+
+| Check | Result |
+|---|---|
+| Speed column after completion | ✅ keeps last measured value (e.g. `12,0 tok/s`), no `--` reset |
+| Prompt speed column (replaces Tokens) | ✅ shows prefill speed for lazy-prefilled chats (app-side estimate) |
+| Context row after completion | ✅ `consumed / max` shows session-accumulated tokens (user-verified 201 on a longer history) |
+| RAM column | ✅ unchanged, still correct |
+| Compaction (`75% compress`) | ✅ still works; compaction note still rendered |
+
+**Known limitation (v1.1.2):** after a compaction reset, the re-prefilled history is a
+single engine-side summary message not present in the app UI history — so the app-side
+estimate covers only the turn's own tokens and the Context row under-counts the re-prefilled
+summary until the engine exposes message rendering at reset time (upstream gap).
+
 ## Known limitations
 
 - When online, the in-memory model list shown at launch is the **build-time snapshot**;

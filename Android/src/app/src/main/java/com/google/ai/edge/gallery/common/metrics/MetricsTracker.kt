@@ -399,9 +399,15 @@ internal constructor(
         val turnMetrics = inferenceTracker?.endTurn(status = status) ?: return null
         val memoryMetrics = memoryMonitor?.stop() ?: MemoryMetrics.getDefaultInstance()
         val batteryMetrics = powerMonitor?.stop() ?: BatteryMetrics.getDefaultInstance()
+        // Fork: engine benchmark telemetry is 0 for lazily-prefilled conversations, so the
+        // finalized turn metrics can be missing latency fields that were measured during the
+        // turn. Carry the last live-measured values forward so the LiveMetricsBar keeps
+        // showing them after generation ends.
+        val lastLiveInference = _liveMetrics.value?.inference
+        val mergedTurnMetrics = mergeTerminalLatencyGaps(turnMetrics, lastLiveInference)
         inferenceMetrics {
             this.metadata = this@LitertlmMetricsTracker.metadata
-            this.inference = turnMetrics
+            this.inference = mergedTurnMetrics
             this.memory = memoryMetrics
             this.battery = batteryMetrics
           }
@@ -413,6 +419,47 @@ internal constructor(
       }
     metricsLogger.logMetrics(finalMetrics)
     return finalMetrics
+  }
+
+  /**
+   * Fork: fills latency fields missing from the finalized turn metrics (engine telemetry is 0
+   * for lazily-prefilled conversations) with the values measured in the last live snapshot
+   * during the turn (TTFT, prefill speed, decode speed). Engine-provided values always win.
+   */
+  private fun mergeTerminalLatencyGaps(
+    final: TurnInferenceMetrics,
+    lastLive: TurnInferenceMetrics?,
+  ): TurnInferenceMetrics {
+    if (lastLive == null) return final
+    val latency = final.latency
+    val liveLatency = lastLive.latency
+    val needTtft = !latency.hasTtftMs() && liveLatency.hasTtftMs()
+    val needPrefill =
+      !latency.hasPrefillSpeedTps() &&
+        liveLatency.hasPrefillSpeedTps() &&
+        liveLatency.prefillSpeedTps > 0f
+    val needDecode =
+      !latency.hasDecodeSpeedTps() &&
+        liveLatency.hasDecodeSpeedTps() &&
+        liveLatency.decodeSpeedTps > 0f
+    if (!needTtft && !needPrefill && !needDecode) return final
+    return turnInferenceMetrics {
+      this.turnIndex = final.turnIndex
+      this.status = final.status
+      this.tokens = final.tokens
+      this.context = final.context
+      this.latency =
+        latencyMetrics {
+          if (latency.hasTtftMs()) this.ttftMs = latency.ttftMs
+          if (latency.hasPrefillSpeedTps()) this.prefillSpeedTps = latency.prefillSpeedTps
+          if (latency.hasDecodeSpeedTps()) this.decodeSpeedTps = latency.decodeSpeedTps
+          if (latency.hasTotalLatencyMs()) this.totalLatencyMs = latency.totalLatencyMs
+          if (latency.hasDecodeDurationMs()) this.decodeDurationMs = latency.decodeDurationMs
+          if (needTtft) this.ttftMs = liveLatency.ttftMs
+          if (needPrefill) this.prefillSpeedTps = liveLatency.prefillSpeedTps
+          if (needDecode) this.decodeSpeedTps = liveLatency.decodeSpeedTps
+        }
+    }
   }
 
   private fun buildMetadata(): InferenceMetadata {

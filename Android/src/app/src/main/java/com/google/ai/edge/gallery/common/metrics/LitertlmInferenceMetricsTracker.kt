@@ -226,6 +226,9 @@ class LitertlmInferenceMetricsTracker(
     val turnDuration: Duration,
     val streamedTtft: Duration?,
     val maxContextTokens: Int,
+    // Fork: app-side inputs for the consumed-context fallback when engine telemetry is 0.
+    val startContextTokens: Int? = null,
+    val estimatedSessionTokens: Int? = null,
   )
 
   /**
@@ -234,6 +237,19 @@ class LitertlmInferenceMetricsTracker(
    * - [calculateStatsOnTurnEnd]: When a turn ends (`endTurn`).
    */
   private class TurnMetricsCalculator(private val maxContextTokens: Int) {
+    /**
+     * Fork: the engine reports no prefill speed for lazily-prefilled (re-prefilled)
+     * conversations, so we estimate it app-side: prefill token count ÷ time-to-first-token
+     * seconds (the re-prefill duration). Engine-reported values always take precedence when
+     * present.
+     */
+    private fun appPrefillSpeed(prefillTokens: Int?, ttft: Duration?): Float? {
+      val tokens = prefillTokens?.takeIf { it > 0 } ?: return null
+      val seconds = ttft?.inWholeMilliseconds?.let { it / 1000f } ?: return null
+      if (seconds <= 0f) return null
+      return (tokens / seconds).toFloat()
+    }
+
     /**
      * Computes live metrics during the decoding phase ([InferenceStatus.Code.DECODING]), after the
      * first output token has arrived.
@@ -255,15 +271,16 @@ class LitertlmInferenceMetricsTracker(
       val outputTokens = turn.streamedOutputTokens
       val totalTokens = if (promptTokens != null) promptTokens + outputTokens else null
       val decodeDuration = (turnDuration - ttftDuration).coerceAtLeast(Duration.ZERO)
-      val prefillSpeed = prefillBenchmark?.prefillSpeedTps?.takeIf { it > 0f }
+      val prefillSpeed =
+        prefillBenchmark?.prefillSpeedTps?.takeIf { it > 0f }
+          ?: appPrefillSpeed(turn.startContextTokens, turn.ttftDuration)
       val decodeSpeed =
         calculateDecodeSpeedTps(outputTokens = outputTokens, decodeDuration = decodeDuration)
+      // Fork: always estimate the consumed context from the turn-start KV count plus this
+      // turn's prompt and streamed output tokens; the engine's count is 0 for lazily-prefilled
+      // conversations, so an engine-only value would stay unavailable.
       val consumedContextTokens =
-        if (totalTokens != null) {
-          (turn.startContextTokens ?: 0) + totalTokens
-        } else {
-          null
-        }
+        ((turn.startContextTokens ?: 0) + (promptTokens ?: 0) + outputTokens).takeIf { it > 0 }
 
       return buildTurnMetrics(
         turnIndex = turn.turnIndex,
@@ -317,13 +334,21 @@ class LitertlmInferenceMetricsTracker(
         } else {
           null
         }
-      val prefillSpeed = benchmark?.prefillSpeedTps?.takeIf { it > 0f }
+      val prefillSpeed =
+        benchmark?.prefillSpeedTps?.takeIf { it > 0f }
+          ?: appPrefillSpeed(snapshot.estimatedSessionTokens, snapshot.streamedTtft)
       // Decode speed is derived from engine decodeTokenCount and app-measured decode duration:
       // (outputTokens - 1) / decodeSeconds.
       val decodeSpeed =
         calculateDecodeSpeedTps(outputTokens = outputTokens, decodeDuration = decodeDuration)
-      // Context utilization comes from Conversation.getTokenCount().
-      val consumedContextTokens = snapshot.diagnostics.tokenCount?.takeIf { it > 0 }
+      // Context utilization: engine KV-cache count first; Fork: LiteRT-LM reports 0 for
+      // lazily-prefilled conversations, so fall back to the app-side history estimate, then
+      // to the app-computed (start + prompt + output) total.
+      val consumedContextTokens =
+        snapshot.diagnostics.tokenCount?.takeIf { it > 0 }
+          ?: snapshot.estimatedSessionTokens?.takeIf { it > 0 }
+          ?: ((snapshot.startContextTokens ?: 0) + (promptTokens ?: 0) + (outputTokens ?: 0))
+              .takeIf { it > 0 }
 
       return buildTurnMetrics(
         turnIndex = snapshot.turnIndex,
@@ -464,6 +489,10 @@ class LitertlmInferenceMetricsTracker(
         turnDuration = turnDuration,
         streamedTtft = current.ttftDuration,
         maxContextTokens = maxContextTokens,
+        startContextTokens = current.startContextTokens,
+        // Fork: app-side estimate of the re-prefilled history (engine telemetry is 0 for
+        // lazily-prefilled conversations).
+        estimatedSessionTokens = current.session.getEstimatedSessionTokens(),
       )
     val finalMetrics = calculator.calculateStatsOnTurnEnd(snapshot = snapshot)
     val completed = TurnState.Completed(turnIndex = current.turnIndex, finalMetrics = finalMetrics)
@@ -474,12 +503,18 @@ class LitertlmInferenceMetricsTracker(
 
   private fun queryTokenCount(session: ConversationSession): Int? {
     if (!session.isAlive) return null
-    return try {
-      session.getTokenCount()?.takeIf { it >= 0 }
-    } catch (e: Exception) {
-      Log.d(TAG, "Failed to query token count: ${e.message}")
-      null
-    }
+    val engineCount =
+      try {
+        session.getTokenCount()
+      } catch (e: Exception) {
+        Log.d(TAG, "Failed to query token count: ${e.message}")
+        null
+      }
+    val fromEngine = engineCount?.takeIf { it > 0 }
+    if (fromEngine != null) return fromEngine
+    // Fork: LiteRT-LM reports 0 for lazily-prefilled (restored) conversations; fall back to
+    // the app-side estimate of the re-prefilled history's token count.
+    return session.getEstimatedSessionTokens()?.takeIf { it > 0 }
   }
 
   /**
