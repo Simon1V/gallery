@@ -72,10 +72,9 @@ import kotlinx.coroutines.launch
 /** Resolved presentation state for [LiveMetricsBar]. */
 internal data class LiveMetricsUiState(
   val speedValue: String,
-  val speedAnnotation: String?,
-  val speedSubtextLines: List<String>,
-  // Fork v1.1.2: the redundant Tokens column is replaced by the prompt (prefill) processing
-  // speed; the session-accumulated token count lives in the Context row.
+  // Fork v1.1.2: the redundant per-turn Tokens column is replaced by the prefill (prompt)
+  // processing speed column; the session-accumulated token count lives in the Context row.
+  // TTFT and prefill speed are shown in that column only — the decode column is value-only.
   val prefillSpeedValue: String,
   val prefillSpeedSubtext: String?,
   val ramValue: String,
@@ -144,14 +143,13 @@ fun LiveMetricsBar(
         verticalAlignment = Alignment.Top,
       ) {
         MetricColumn(
-          label = stringResource(R.string.live_metrics_speed),
+          label = stringResource(R.string.live_metrics_decode_speed),
           value = uiState.speedValue,
-          valueAnnotation = uiState.speedAnnotation,
-          subtextLines = uiState.speedSubtextLines,
+          subtextLines = emptyList(),
           modifier = Modifier.weight(1f),
         )
         MetricColumn(
-          label = stringResource(R.string.live_metrics_prompt_speed),
+          label = stringResource(R.string.live_metrics_prefill),
           value = uiState.prefillSpeedValue,
           subtextLines = listOfNotNull(uiState.prefillSpeedSubtext),
           modifier = Modifier.weight(1f),
@@ -313,12 +311,6 @@ internal fun resolveLiveMetricsUiState(
   val hasPrefillSpeed =
     !isCompactingContext && latency.hasPrefillSpeedTps() && latency.prefillSpeedTps > 0f
   val hasTtft = !isCompactingContext && latency.hasTtftMs() && latency.ttftMs > 0L
-  val hasInitDuration = metadata.hasInitDurationMs() && metadata.initDurationMs > 0L
-
-  val showDecodeSpeed =
-    hasDecodeSpeed &&
-      statusCode != InferenceStatus.Code.IDLE &&
-      statusCode != InferenceStatus.Code.PREFILLING
 
   val speedValue =
     when (statusCode) {
@@ -340,38 +332,6 @@ internal fun resolveLiveMetricsUiState(
         } else {
           stringResource(R.string.live_metrics_speed_empty)
         }
-    }
-
-  val speedAnnotation =
-    if (showDecodeSpeed) {
-      stringResource(R.string.live_metrics_speed_decode_annotation)
-    } else {
-      null
-    }
-
-  val speedSubtextLines =
-    when {
-      hasTtft || hasPrefillSpeed ->
-        buildList {
-          if (hasTtft) {
-            add(stringResource(R.string.live_metrics_ttft_format, latency.ttftMs))
-          }
-          if (hasPrefillSpeed) {
-            add(stringResource(R.string.live_metrics_prefill_speed_format, latency.prefillSpeedTps))
-          }
-        }
-      hasInitDuration ->
-        listOf(
-          if (metadata.initDurationMs >= MILLIS_PER_SECOND) {
-            stringResource(
-              R.string.live_metrics_init_seconds_format,
-              metadata.initDurationMs / MILLIS_PER_SECOND_FLOAT,
-            )
-          } else {
-            stringResource(R.string.live_metrics_init_ms_format, metadata.initDurationMs)
-          }
-        )
-      else -> emptyList()
     }
 
   // Fork: the redundant per-turn Tokens column is replaced by the prompt (prefill) processing
@@ -467,8 +427,6 @@ internal fun resolveLiveMetricsUiState(
 
   return LiveMetricsUiState(
     speedValue = speedValue,
-    speedAnnotation = speedAnnotation,
-    speedSubtextLines = speedSubtextLines,
     prefillSpeedValue = prefillSpeedValue,
     prefillSpeedSubtext = prefillSpeedSubtext,
     ramValue = ramValue,

@@ -202,14 +202,16 @@ conversations report `getTokenCount() == 0` and no prefill/decode telemetry at t
    the final `InferenceMetrics`. Engine-provided values always win; the live merge only
    fills gaps. The bar therefore keeps showing the measured speed after completion.
 
-2. **Redundant `Tokens` column replaced by `Prompt speed`** (`LiveMetricsBar`):
+2. **Redundant `Tokens` column replaced by `Prefill`** (`LiveMetricsBar`):
    the per-turn token count duplicated the Context row's session total, so the middle
-   column now shows prompt (prefill) processing speed instead. Value: engine
+   column now shows **Prefill** (prompt) processing speed instead. Value: engine
    `prefillSpeedTps` when available; for lazily-prefilled conversations the tracker
    estimates it app-side — re-prefilled history tokens ÷ TTFT seconds
    (`appPrefillSpeed` in `LitertlmInferenceMetricsTracker`, live *and* final paths).
-   Subtext: TTFT in ms (the re-prefill duration). The session-accumulated token count
-   is shown in the Context row (`consumed / max`, %) — the single source of truth.
+   Subtext: TTFT in ms (the re-prefill duration) — the *only* place TTFT/prefill are
+   shown. The first column is **Decode speed** (value-only, no subtext) to avoid
+   duplicating the Prefill column; the session-accumulated token count is shown in
+   the Context row (`consumed / max`, %) — the single source of truth.
 
 3. **Session-accumulated consumed tokens** (context row shows the running total, not
    per-turn):
@@ -232,7 +234,7 @@ conversations report `getTokenCount() == 0` and no prefill/decode telemetry at t
 | Check | Result |
 |---|---|
 | Speed column after completion | ✅ keeps last measured value (e.g. `12,0 tok/s`), no `--` reset |
-| Prompt speed column (replaces Tokens) | ✅ shows prefill speed for lazy-prefilled chats (app-side estimate) |
+| Prefill column (replaces Tokens) | ✅ shows prefill speed for lazy-prefilled chats (app-side estimate) |
 | Context row after completion | ✅ `consumed / max` shows session-accumulated tokens (user-verified 201 on a longer history) |
 | RAM column | ✅ unchanged, still correct |
 | Compaction (`75% compress`) | ✅ still works; compaction note still rendered |

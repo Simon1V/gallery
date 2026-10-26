@@ -17,14 +17,15 @@ turn metrics (`MetricsTracker.mergeTerminalLatencyGaps`). Engine-provided values
 always win; the merge only fills gaps. The bar therefore keeps showing the measured
 speed after a reply completes instead of resetting to `--`.
 
-### 2. Redundant `Tokens` column replaced by `Prompt speed`
+### 2. Redundant `Tokens` column replaced by `Prefill` (prompt processing speed)
 The per-turn token count duplicated the Context row's session total, so the middle
-column now shows **prompt (prefill) processing speed**:
+column now shows **Prefill** (prompt) processing speed:
 
 - Engine `prefillSpeedTps` when the engine reports it (fresh conversations).
 - App-side estimate for re-prefilled (lazy-prefill) conversations: re-prefilled
   history tokens ÷ time-to-first-token seconds (the re-prefill duration).
-- Subtext: TTFT in ms (the prefill duration).
+- Subtext: TTFT in ms (the prefill duration) — the *only* column showing TTFT/
+  prefill, so the first column is now **Decode speed** (value-only, no subtext).
 
 The session-accumulated token count now lives in one place: the **Context** row
 (`consumed / max`, %), which is the single source of truth.
@@ -51,7 +52,7 @@ Unchanged — was already correct.
 | Check | Turn 1 (fresh) | Turn 2 (re-prefill) | Turn 3 (re-prefill) |
 |---|---|---|---|
 | Speed column after completion | ✅ 12,3 tok/s | ✅ 11,9 tok/s | ✅ 11,8 tok/s |
-| Prompt speed column | ✅ 8,5 tok/s (engine) | ✅ 254,7 tok/s (app-est.) | ✅ 523,1 tok/s (app-est.) |
+| Prefill column (replaces Tokens) | ✅ 8,5 tok/s (engine) | ✅ 254,7 tok/s (app-est.) | ✅ 523,1 tok/s (app-est.) |
 | Context row (session total) | ✅ 104 / 15553 | ✅ 186 / 15553 | ✅ 246 / 15553 |
 | RAM column | ✅ 3,98 GB | ✅ 3,86 GB | ✅ 3,84 GB |
 
@@ -72,6 +73,7 @@ re-prefilled summary until the engine exposes message rendering at reset time
   `getEstimatedSessionTokens()`
 - `ui/llmchat/LlmChatModelHelper.kt` — `sessionTokenEstimate` on the model instance
 - `ui/llmchat/LlmChatViewModel.kt` — history estimate into `extraContext`
-- `ui/common/chat/LiveMetricsBar.kt` — `Tokens` → `Prompt speed` column
+- `ui/common/chat/LiveMetricsBar.kt` — `Tokens` → `Prefill` column; `Speed` →
+  `Decode speed` (value-only; TTFT/prefill shown in the Prefill column only)
 - `res/values/strings.xml` — `live_metrics_prompt_speed` label
 - `AGENTS.md`, `FORK_NOTES.md` — invariants + change log

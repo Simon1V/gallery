@@ -1332,6 +1332,9 @@
   <!-- Fork v1.1.2: replaces the redundant Tokens column; the session-accumulated token count
        is shown in the Context row instead. -->
   <string name="live_metrics_prompt_speed" translatable="true" description="Fork: column header label in the live inference metrics banner indicating prompt (prefill) processing speed in tokens per second; Prompt speed is a noun phrase. [CHAR_LIMIT=15]">Prompt speed</string>
+  <!-- Fork v1.1.2 final: column labels after the de-duplication (TTFT/prefill subtext moved to the Prefill column only). -->
+  <string name="live_metrics_decode_speed" translatable="true" description="Fork: column header label in the live inference metrics banner indicating token decode (generation) speed; Decode speed is a noun phrase. [CHAR_LIMIT=15]">Decode speed</string>
+  <string name="live_metrics_prefill" translatable="true" description="Fork: column header label in the live inference metrics banner indicating prompt prefill processing speed; Prefill is a noun. [CHAR_LIMIT=15]">Prefill</string>
   <!-- Label for live metrics memory. -->
   <string name="live_metrics_ram" translatable="true" description="Column header label in the live inference metrics banner above the chat input box indicating resident system memory usage; RAM is an acronym for Random Access Memory. [CHAR_LIMIT=15]">RAM</string>
   <!-- Label for live metrics context window. -->
